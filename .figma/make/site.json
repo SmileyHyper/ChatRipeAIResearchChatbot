@@ -1,0 +1,10 @@
+{
+  "description": "ChatRipe helps researchers, innovators, and educators use agentic AI to support learning, research, publications, and community outreach.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

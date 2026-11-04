@@ -8,7 +8,6 @@ import { ChatComposer } from './components/ChatComposer';
 import { SidebarConversations } from './components/SidebarConversations';
 import { ResearchLibrary } from './components/ResearchLibrary';
 import { ResearchEditor } from './components/ResearchEditor';
-import { MemoryManager } from './components/MemoryManager';
 import { ConversationHistoryView } from './components/ConversationHistoryView';
 
 export default function App() {

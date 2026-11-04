@@ -730,76 +730,141 @@ export async function handleFolders(req: IncomingMessage, res: ServerResponse, p
 }
 
 // ==========================================
-// 6. AI WRITING ASSISTANT CONTROLLER (For Word-Style Editor)
+// 6. AI WRITING ASSISTANT (chat-to-prompt + humanizer)
 // ==========================================
-export async function handleWritingAssistant(req: IncomingMessage, res: ServerResponse) {
-  const body = await readJsonBody(req);
-  const { action, text, context, provider = 'ollama', model = 'llama3.2:3b', settings } = body;
+const WRITING_SYSTEM_PROMPT = `You are an expert academic writing assistant embedded in a research paper editor.
+- Follow the user's instruction exactly, using the provided document text or selection as source material.
+- If the instruction asks for a rewrite or draft, return ONLY the text to insert, with no meta-commentary, preambles, or markdown symbols such as ** or #.
+- If the user asks a question, answer briefly and directly.
+- Never invent citations, statistics, or findings that are not in the provided text.`;
 
-  if (!action || !text || !text.trim()) {
-    return sendJson(res, 400, { error: 'action and text are required' });
+const HUMANIZE_SYSTEM_PROMPT = `You are an editor who makes academic prose read like it was written by a careful human researcher.
+Rewrite the text following these rules:
+- Preserve every fact, number, citation, technical term, and the original meaning. Do not add new claims.
+- Vary sentence length and structure; mix short and long sentences. Avoid uniform rhythm.
+- Remove filler and stock phrases (e.g. "delve into", "it is important to note", "in today's world", "plays a crucial role", "moreover/furthermore" chains, "in conclusion", "tapestry", "landscape", "underscores").
+- Prefer plain, specific wording over inflated vocabulary. Use active voice where natural.
+- Keep a formal scholarly register suitable for a thesis or journal paper. No slang, no emojis.
+- Avoid excessive lists, em dashes, and symmetrical "not only... but also" constructions.
+Return ONLY the rewritten text.`;
+
+const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
+  ollama: 'llama3.2:3b',
+  gemini: 'gemini-2.5-flash',
+  claude: 'claude-3-7-sonnet-latest',
+};
+
+async function callWritingModel(opts: {
+  provider: string;
+  model: string;
+  system: string;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  settings?: any;
+}): Promise<string> {
+  const { provider, model, system, messages, settings } = opts;
+
+  if (provider === 'gemini') {
+    const apiKey = settings?.geminiApiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Gemini API key is missing. Configure in Settings.');
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model,
+      contents: messages.map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      })),
+      config: { systemInstruction: system },
+    });
+    return response.text || '';
   }
 
-  const actionPrompts: Record<string, string> = {
-    improve: 'Rewrite the following academic research passage to enhance academic rigor, scholarly clarity, precision, and tone without altering key claims:',
-    grammar: 'Correct all grammar, syntax, punctuation, and academic style errors in the following text while preserving technical terminology:',
-    paraphrase: 'Paraphrase the following academic excerpt using scholarly terminology and appropriate synthesis to avoid plagiarism:',
-    summarize: 'Provide a concise, high-density academic summary of the following excerpt highlighting key methodology, findings, and arguments:',
-    expand: 'Expand and elaborate on the following research paragraph with academic depth, supporting rationale, and analytical depth:',
-    shorten: 'Condense the following passage into a concise, punchy academic statement removing verbosity and redundancy:',
-    objectives: 'Formulate precise, SMART research objectives (general and specific) based on this research concept:',
-    methodology: 'Draft a structured research methodology section (research design, participants/samples, instruments, data collection, and statistical analysis) based on this concept:',
-    conclusion: 'Draft a comprehensive academic conclusion and forward-looking research recommendations based on the following findings:',
-    abstract: 'Draft a standard 200-250 word structured academic abstract (Background, Objectives, Methodology, Findings, and Significance) based on this text:',
-    references: 'Format the following bibliographic notes into strictly accurate APA 7th Edition academic citations:',
-  };
+  if (provider === 'claude') {
+    const apiKey = settings?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('Claude API key is missing. Configure in Settings.');
+    const anthropic = new Anthropic({ apiKey });
+    const msg = await anthropic.messages.create({
+      model,
+      max_tokens: 2048,
+      system,
+      messages,
+    });
+    return (msg.content[0] as any)?.text || '';
+  }
 
-  const instruction = actionPrompts[action] || 'Improve and refine the following research text academically:';
-  const fullPrompt = `${instruction}\n\nContext / Topic: ${context || 'Scholarly Research Paper'}\n\nOriginal Text:\n${text}\n\nRefined Output (Provide ONLY the refined text without meta-commentary):`;
+  const ollamaUrl = settings?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_URL;
+  const resp = await fetch(`${ollamaUrl}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: system }, ...messages],
+      stream: false,
+    }),
+  });
+  if (!resp.ok) throw new Error(`Ollama error (${resp.status}): ${await resp.text()}`);
+  const data: any = await resp.json();
+  return data.message?.content || '';
+}
+
+export async function handleWritingAssistant(req: IncomingMessage, res: ServerResponse) {
+  const body = await readJsonBody(req);
+  const {
+    prompt,                 
+    text = '',             
+    hasSelection = false,
+    history = [],          
+    humanize = false,
+    context,
+    provider = 'ollama',
+    settings,
+  } = body;
+  const model = body.model || DEFAULT_MODEL_BY_PROVIDER[provider] || DEFAULT_MODEL_BY_PROVIDER.ollama;
+
+  if (!prompt || !String(prompt).trim()) {
+    return sendJson(res, 400, { error: 'prompt is required' });
+  }
 
   try {
-    let result = '';
+    const cleanHistory = (Array.isArray(history) ? history : [])
+      .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant') && m.content)
+      .slice(-8)
+      .map((m: any) => ({ role: m.role, content: String(m.content) }));
 
-    if (provider === 'gemini') {
-      const apiKey = settings?.geminiApiKey || process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error('Gemini API key is missing. Configure in Settings.');
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: model || 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+    const userTurn = [
+      `Paper: ${context || 'Scholarly Research Paper'}`,
+      text.trim()
+        ? `${hasSelection ? 'Selected text' : 'Current document text'}:\n"""\n${text}\n"""`
+        : 'No document text provided.',
+      `Instruction: ${String(prompt).trim()}`,
+    ].join('\n\n');
+
+    let generated = (
+      await callWritingModel({
+        provider,
+        model,
+        system: WRITING_SYSTEM_PROMPT,
+        messages: [...cleanHistory, { role: 'user', content: userTurn }],
+        settings,
+      })
+    ).trim();
+
+    // Second pass: humanize the draft
+    if (humanize && generated) {
+      const humanized = await callWritingModel({
+        provider,
+        model,
+        system: HUMANIZE_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: generated }],
+        settings,
       });
-      result = response.text || '';
-    } else if (provider === 'claude') {
-      const apiKey = settings?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
-      if (!apiKey) throw new Error('Claude API key is missing. Configure in Settings.');
-      const anthropic = new Anthropic({ apiKey });
-      const msg = await anthropic.messages.create({
-        model: model || 'claude-3-7-sonnet-latest',
-        max_tokens: 2048,
-        messages: [{ role: 'user', content: fullPrompt }],
-      });
-      result = (msg.content[0] as any)?.text || '';
-    } else {
-      // Default Ollama
-      const ollamaUrl = settings?.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_URL;
-      const resp = await fetch(`${ollamaUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model || 'llama3.2:3b',
-          messages: [{ role: 'user', content: fullPrompt }],
-          stream: false,
-        }),
-      });
-      if (!resp.ok) throw new Error(`Ollama error (${resp.status}): ${await resp.text()}`);
-      const data: any = await resp.json();
-      result = data.message?.content || '';
+      if (humanized.trim()) generated = humanized.trim();
     }
 
     return sendJson(res, 200, {
       original: text,
-      generated: result.trim(),
-      action,
+      generated,
+      action: 'chat',
+      humanized: Boolean(humanize),
     });
   } catch (err: any) {
     return sendJson(res, 500, { error: err.message || 'AI Writing Assistant generation failed' });

@@ -191,14 +191,16 @@ export class AIService {
       }
     );
   }
-
   async runWritingAssistant(params: {
-    action: WritingAssistantAction;
-    text: string;
+    prompt: string;
+    text?: string;
+    hasSelection?: boolean;
+    history?: { role: 'user' | 'assistant'; content: string }[];
+    humanize?: boolean;
     context?: string;
     provider?: AIProviderId;
     model?: string;
-  }): Promise<{ original: string; generated: string; action: string }> {
+  }): Promise<{ original: string; generated: string; action: string; humanized?: boolean }> {
     const provider = params.provider || 'ollama';
     const model = params.model || this.modelManager.getSelectedModel(provider);
 
@@ -206,8 +208,11 @@ export class AIService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        action: params.action,
+        prompt: params.prompt,
         text: params.text,
+        hasSelection: params.hasSelection,
+        history: params.history,
+        humanize: params.humanize,
         context: params.context,
         provider,
         model,
@@ -222,7 +227,6 @@ export class AIService {
 
     return await res.json();
   }
-
   stopGeneration() {
     this.responseHandler.stopGeneration();
   }

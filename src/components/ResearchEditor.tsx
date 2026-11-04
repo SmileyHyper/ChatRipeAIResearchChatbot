@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { AIProviderId, DocumentVersion, ResearchDocument, WritingAssistantAction } from '../types/ai';
+import type { AIProviderId, DocumentVersion, ResearchDocument } from '../types/ai';
 import { RESEARCH_TEMPLATES, type ResearchTemplate } from '../data/research-templates';
 import { aiService } from '../services/ai';
 
@@ -101,6 +101,8 @@ function plainTextToHtml(text: string): string {
     .join('');
 }
 
+type ChatMessage = { role: 'user' | 'assistant'; content: string; error?: boolean };
+
 export function ResearchEditor({ initialDocument, onBackToLibrary }: ResearchEditorProps) {
   const [docId, setDocId] = useState<string | null>(initialDocument?.id || null);
   const [title, setTitle] = useState(initialDocument?.title || 'Untitled Research Paper');
@@ -123,16 +125,19 @@ export function ResearchEditor({ initialDocument, onBackToLibrary }: ResearchEdi
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [aiAssistantOpen, setAiAssistantOpen] = useState(true);
 
-  // AI Assistant States
+  // AI Assistant States (chat-to-prompt)
   const [selectedText, setSelectedText] = useState('');
-  const [aiPromptContext, setAiPromptContext] = useState('');
   const [isAiGenerating, setIsAiGenerating] = useState(false);
-  const [aiResult, setAiResult] = useState<{ original: string; generated: string; action: string } | null>(null);
   const [aiProvider, setAiProvider] = useState<AIProviderId>('ollama');
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [humanize, setHumanize] = useState(true);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const paginateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const savedRange = useRef<Range | null>(null);
 
   const margin = MARGINS[marginSize];
   const marginRef = useRef(margin);
@@ -144,53 +149,63 @@ export function ResearchEditor({ initialDocument, onBackToLibrary }: ResearchEdi
   // (via margin-top) to the top of the next page. The pushes are tagged with
   // data-pg attributes and stripped again before saving.
   const paginate = () => {
-    const ed = editorRef.current;
-    if (!ed) return;
-    const contentH = PAGE_H - 2 * marginRef.current;
-    const kids = Array.from(ed.children) as HTMLElement[];
+  const ed = editorRef.current;
+  if (!ed) return;
 
-    // 1. undo previous pushes
-    for (const el of kids) {
-      if (el.dataset.pg) {
-        el.style.marginTop = el.dataset.pgOrig || '';
-        if (!el.getAttribute('style')) el.removeAttribute('style');
-        delete el.dataset.pg;
-        delete el.dataset.pgOrig;
-      }
+  // Unwrap legacy wrapper divs (e.g. <div class="doc-body">) so each block can paginate
+  const hasWrapper = Array.from(ed.children).some(
+    (el) =>
+      el.tagName === 'DIV' &&
+      el.querySelector(
+        ':scope > p, :scope > h1, :scope > h2, :scope > h3, :scope > ul, :scope > ol, :scope > table, :scope > div'
+      )
+  );
+  if (hasWrapper) normalizeBlocks();
+
+  const contentH = PAGE_H - 2 * marginRef.current;
+  const kids = Array.from(ed.children) as HTMLElement[]; // read AFTER normalizing
+
+  // 1. undo previous pushes
+  for (const el of kids) {
+    if (el.dataset.pg) {
+      el.style.marginTop = el.dataset.pgOrig || '';
+      if (!el.getAttribute('style')) el.removeAttribute('style');
+      delete el.dataset.pg;
+      delete el.dataset.pgOrig;
     }
+  }
 
-    const pushTo = (el: HTMLElement, target: number) => {
-      const diff = target - el.offsetTop;
-      if (diff === 0) return;
-      if (!el.dataset.pg) {
-        el.dataset.pg = '1';
-        el.dataset.pgOrig = el.style.marginTop || '';
-      }
-      const cur = parseFloat(getComputedStyle(el).marginTop) || 0;
-      el.style.marginTop = `${Math.max(0, cur + diff)}px`;
-    };
-
-    // 2. walk blocks in order, pushing the ones that don't fit
-    for (const el of kids) {
-      const top = el.offsetTop;
-      const h = el.offsetHeight;
-      const k = Math.floor(top / PAGE_PERIOD);
-      const contentEnd = k * PAGE_PERIOD + contentH;
-      const nextStart = (k + 1) * PAGE_PERIOD;
-      const startsInMargin = top >= contentEnd;
-      const crossesBottom = top + h > contentEnd && h <= contentH;
-      if (startsInMargin || crossesBottom) {
-        pushTo(el, nextStart);
-        pushTo(el, nextStart); // second pass corrects margin-collapse differences
-      }
+  const pushTo = (el: HTMLElement, target: number) => {
+    const diff = target - el.offsetTop;
+    if (diff === 0) return;
+    if (!el.dataset.pg) {
+      el.dataset.pg = '1';
+      el.dataset.pgOrig = el.style.marginTop || '';
     }
-
-    // 3. page count from the bottom of the last block
-    const last = kids[kids.length - 1];
-    const bottom = last ? last.offsetTop + last.offsetHeight : 0;
-    setPageCount(Math.max(1, Math.floor(Math.max(0, bottom - 1) / PAGE_PERIOD) + 1));
+    const cur = parseFloat(getComputedStyle(el).marginTop) || 0;
+    el.style.marginTop = `${Math.max(0, cur + diff)}px`;
   };
 
+  // 2. walk blocks in order, pushing the ones that don't fit
+  for (const el of kids) {
+    const top = el.offsetTop;
+    const h = el.offsetHeight;
+    const k = Math.floor(top / PAGE_PERIOD);
+    const contentEnd = k * PAGE_PERIOD + contentH;
+    const nextStart = (k + 1) * PAGE_PERIOD;
+    const startsInMargin = top >= contentEnd;
+    const crossesBottom = top + h > contentEnd && h <= contentH;
+    if (startsInMargin || crossesBottom) {
+      pushTo(el, nextStart);
+      pushTo(el, nextStart); // second pass corrects margin-collapse differences
+    }
+  }
+
+  // 3. page count from the bottom of the last block
+  const last = kids[kids.length - 1];
+  const bottom = last ? last.offsetTop + last.offsetHeight : 0;
+  setPageCount(Math.max(1, Math.floor(Math.max(0, bottom - 1) / PAGE_PERIOD) + 1));
+};
   const schedulePaginate = () => {
     if (paginateTimer.current) clearTimeout(paginateTimer.current);
     paginateTimer.current = setTimeout(paginate, 60);
@@ -318,6 +333,7 @@ const normalizeBlocks = () => {
       } else {
         editorRef.current.innerHTML = ``;
       }
+      normalizeBlocks();
       updateCounts();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -337,6 +353,11 @@ const normalizeBlocks = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep the chat scrolled to the latest message
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chat, isAiGenerating]);
+
   const updateCounts = () => {
     if (editorRef.current) {
       const text = editorRef.current.innerText || '';
@@ -353,10 +374,12 @@ const normalizeBlocks = () => {
     updateCounts();
   };
 
+  // Remember the selection so it survives clicking into the chat box
   const handleSelectionChange = () => {
     const sel = window.getSelection();
-    if (sel && sel.toString().trim()) {
+    if (sel && sel.toString().trim() && sel.rangeCount && editorRef.current?.contains(sel.anchorNode)) {
       setSelectedText(sel.toString().trim());
+      savedRange.current = sel.getRangeAt(0).cloneRange();
     }
     updateCurrentPage();
   };
@@ -393,6 +416,7 @@ const normalizeBlocks = () => {
       if (editorRef.current) {
         // Flat top-level blocks so each one can flow onto the next page
         editorRef.current.innerHTML = markdownToHtml(tpl.content);
+        normalizeBlocks();
         setSaveStatus('unsaved');
         updateCounts();
         setTemplatesOpen(false);
@@ -480,6 +504,7 @@ const normalizeBlocks = () => {
         setTitle(doc.title);
         if (editorRef.current && doc.html_content) {
           editorRef.current.innerHTML = doc.html_content;
+          normalizeBlocks();
           updateCounts();
         }
         setSaveStatus('saved');
@@ -520,6 +545,7 @@ const normalizeBlocks = () => {
         const data = await res.json();
         if (editorRef.current && data.document.html_content) {
           editorRef.current.innerHTML = data.document.html_content;
+          normalizeBlocks();
           updateCounts();
         }
         setVersionsOpen(false);
@@ -527,43 +553,55 @@ const normalizeBlocks = () => {
     } catch {}
   };
 
-  // AI Assistant Action
-  const handleRunAiAction = async (action: WritingAssistantAction) => {
-    const textToProcess = selectedText || editorRef.current?.innerText || '';
-    if (!textToProcess.trim()) {
-      alert('Select text in your paper or draft content first.');
-      return;
-    }
+  // ---------- AI Assistant: chat to prompt ----------
+  const handleSendChat = async (override?: string) => {
+    const prompt = (override ?? chatInput).trim();
+    if (!prompt || isAiGenerating) return;
 
+    const docText = editorRef.current?.innerText || '';
+    const history = chat.filter((m) => !m.error).slice(-8).map(({ role, content }) => ({ role, content }));
+
+    setChat((prev) => [...prev, { role: 'user', content: prompt }]);
+    setChatInput('');
     setIsAiGenerating(true);
-    setAiResult(null);
 
     try {
       const result = await aiService.runWritingAssistant({
-        action,
-        text: textToProcess,
+        prompt,
+        history,
+        text: selectedText || docText.slice(0, 6000),
+        hasSelection: Boolean(selectedText),
+        humanize,
         context: `${title} (${category})`,
         provider: aiProvider,
       });
-      setAiResult(result);
+      setChat((prev) => [...prev, { role: 'assistant', content: result.generated }]);
     } catch (err: any) {
-      alert(`AI Assistant Error: ${err.message}`);
+      setChat((prev) => [...prev, { role: 'assistant', content: err.message || 'AI request failed', error: true }]);
     } finally {
       setIsAiGenerating(false);
     }
   };
 
-  // Replace selected text with AI generated revision
-  const handleApplyAiResult = () => {
-    if (!aiResult) return;
-    executeCommand('insertHTML', `<span class="ai-revised">${aiResult.generated.replace(/\n/g, '<br/>')}</span>`);
-    setAiResult(null);
+  const restoreSelection = () => {
+    editorRef.current?.focus();
+    const sel = window.getSelection();
+    if (sel && savedRange.current) {
+      sel.removeAllRanges();
+      sel.addRange(savedRange.current);
+    }
   };
 
-  const handleInsertBelow = () => {
-    if (!aiResult) return;
-    executeCommand('insertHTML', `<br/><p>${aiResult.generated.replace(/\n/g, '<br/>')}</p>`);
-    setAiResult(null);
+  const applyText = (generated: string, mode: 'replace' | 'below') => {
+    restoreSelection();
+    const html = plainTextToHtml(generated);
+    if (!(mode === 'replace' && selectedText)) {
+      // collapse to the end of the selection/caret and insert after it
+      window.getSelection()?.collapseToEnd();
+    }
+    executeCommand('insertHTML', html);
+    setSelectedText('');
+    savedRange.current = null;
   };
 
   const stackHeight = pageCount * PAGE_PERIOD - PAGE_GAP;
@@ -862,7 +900,7 @@ const normalizeBlocks = () => {
           </div>
         </div>
 
-        {/* AI Research Writing Assistant Panel */}
+        {/* AI Research Writing Assistant Panel (chat to prompt) */}
         {aiAssistantOpen && (
           <div className="w-[360px] bg-white border-l border-slate-300 flex flex-col h-full shadow-lg z-10 animate-in slide-in-from-right-4 duration-200">
             <div className="flex items-center justify-between px-4 py-3 bg-[#082b5c] text-white">
@@ -883,155 +921,148 @@ const normalizeBlocks = () => {
               </select>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs text-slate-700">
-              {/* Selected Text Preview */}
-              <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                <span className="font-bold text-[10px] text-slate-500 uppercase block mb-1">
-                  Selected Target Text:
-                </span>
-                <p className="text-[11px] text-slate-800 italic line-clamp-3">
-                  {selectedText ? `"${selectedText}"` : '(Highlight any paragraph in your document to target it)'}
+            <div className="flex-1 flex flex-col min-h-0 text-xs text-slate-700">
+              {/* Target text */}
+              <div className="m-3 mb-0 p-2.5 rounded-lg bg-slate-50 border border-slate-200 shrink-0">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-bold text-[10px] text-slate-500 uppercase">
+                    {selectedText ? 'Targeting selection' : 'Targeting whole document'}
+                  </span>
+                  {selectedText && (
+                    <button
+                      onClick={() => {
+                        setSelectedText('');
+                        savedRange.current = null;
+                      }}
+                      className="text-[10px] text-slate-400 hover:text-rose-600"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-800 italic line-clamp-2">
+                  {selectedText ? `"${selectedText}"` : 'Highlight text in your paper to target it.'}
                 </p>
               </div>
 
-              {/* Action Buttons */}
-              <div className="space-y-1.5">
-                <span className="font-bold text-[11px] text-[#082b5c] block mb-1">
-                  Academic Writing Enhancements
-                </span>
+              {/* Chat thread */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                {chat.length === 0 && (
+                  <div className="text-center text-slate-400 py-8 space-y-1">
+                    <p className="font-semibold text-slate-500">Tell the assistant what to do</p>
+                    <p className="text-[11px]">
+                      e.g. "Rewrite this in a more formal tone", "Draft objectives from my title", "Make this paragraph shorter"
+                    </p>
+                  </div>
+                )}
 
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={() => handleRunAiAction('improve')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-sky-50 hover:bg-sky-100 text-[#082b5c] font-semibold text-left border border-sky-200 transition-colors"
-                  >
-                    ✨ Polish Academic Tone
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('grammar')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-left transition-colors"
-                  >
-                    🔍 Fix Grammar & Syntax
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('paraphrase')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-left transition-colors"
-                  >
-                    🔄 Scholarly Paraphrase
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('summarize')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-left transition-colors"
-                  >
-                    📋 Summarize Section
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('expand')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-left transition-colors"
-                  >
-                    📖 Expand Paragraph
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('shorten')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-left transition-colors"
-                  >
-                    ✂️ Make Concise
-                  </button>
+                {chat.map((m, i) => (
+                  <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                    <div
+                      className={`max-w-[92%] rounded-xl px-3 py-2 leading-relaxed whitespace-pre-wrap ${
+                        m.role === 'user'
+                          ? 'bg-[#082b5c] text-white'
+                          : m.error
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : 'bg-slate-100 text-slate-800 border border-slate-200'
+                      }`}
+                    >
+                      {m.error ? `⚠️ ${m.content}` : m.content}
+                      {m.role === 'assistant' && !m.error && (
+                        <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200">
+                          <button
+                            onClick={() => applyText(m.content, 'replace')}
+                            className="px-2 py-1 rounded bg-[#082f66] hover:bg-[#0d4b91] text-white font-bold text-[11px]"
+                          >
+                            {selectedText ? 'Replace selected' : 'Insert'}
+                          </button>
+                          {selectedText && (
+                            <button
+                              onClick={() => applyText(m.content, 'below')}
+                              className="px-2 py-1 rounded border border-slate-300 hover:bg-white font-semibold text-[11px]"
+                            >
+                              Insert below
+                            </button>
+                          )}
+                          <button
+                            onClick={() => navigator.clipboard.writeText(m.content)}
+                            className="px-2 py-1 rounded border border-slate-300 hover:bg-white font-semibold text-[11px]"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {isAiGenerating && (
+                  <div className="flex justify-start">
+                    <div className="px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 text-[11px] text-[#082b5c] animate-pulse">
+                      {humanize ? 'Drafting and humanizing…' : 'Thinking…'}
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Composer */}
+              <div className="p-3 border-t border-slate-200 bg-white shrink-0 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={humanize}
+                      onClick={() => setHumanize(!humanize)}
+                      className={`w-8 h-4 rounded-full relative transition-colors ${humanize ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${humanize ? 'left-4' : 'left-0.5'}`}
+                      />
+                    </button>
+                    <span className="font-semibold text-[11px] text-slate-700">Humanize output</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleSendChat('Rewrite this so it reads naturally, like a human researcher wrote it.')}
+                      disabled={isAiGenerating}
+                      className="text-[11px] font-semibold text-sky-700 hover:underline disabled:opacity-50"
+                      title="Humanize the selected text (or whole document)"
+                    >
+                      Humanize now
+                    </button>
+                    {chat.length > 0 && (
+                      <button onClick={() => setChat([])} className="text-[11px] text-slate-400 hover:text-rose-600">
+                        Clear chat
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <span className="font-bold text-[11px] text-[#082b5c] block pt-3 mb-1">
-                  Section Drafting Generators
-                </span>
-
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendChat();
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Ask the assistant… (Enter to send, Shift+Enter for new line)"
+                    className="flex-1 resize-none rounded-lg border border-slate-300 focus:border-[#69b7e6] outline-none px-2.5 py-2 text-xs"
+                  />
                   <button
-                    onClick={() => handleRunAiAction('objectives')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-semibold text-left border border-emerald-200 transition-colors"
+                    onClick={() => handleSendChat()}
+                    disabled={isAiGenerating || !chatInput.trim()}
+                    className="px-3 py-2 rounded-lg bg-[#082f66] hover:bg-[#0d4b91] disabled:opacity-50 text-white font-bold text-xs"
                   >
-                    🎯 Research Objectives
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('methodology')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-semibold text-left border border-emerald-200 transition-colors"
-                  >
-                    🔬 Draft Methodology
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('conclusion')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-semibold text-left border border-emerald-200 transition-colors"
-                  >
-                    🏁 Conclusion & Recs
-                  </button>
-                  <button
-                    onClick={() => handleRunAiAction('abstract')}
-                    disabled={isAiGenerating}
-                    className="p-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-semibold text-left border border-emerald-200 transition-colors"
-                  >
-                    📝 Draft Abstract
+                    Send
                   </button>
                 </div>
               </div>
-
-              {/* Generation Progress Indicator */}
-              {isAiGenerating && (
-                <div className="p-4 rounded-xl bg-sky-50 border border-sky-200 text-center space-y-2 animate-pulse">
-                  <span className="font-bold text-xs text-[#082b5c]">Generating academic draft...</span>
-                  <p className="text-[11px] text-slate-500">
-                    Applying scholarly syntax with {aiProvider}...
-                  </p>
-                </div>
-              )}
-
-              {/* AI Revision Result Comparison Card */}
-              {aiResult && (
-                <div className="p-3.5 rounded-xl bg-white border border-[#69b7e6] shadow-md space-y-3">
-                  <div className="flex items-center justify-between pb-1 border-b border-slate-100">
-                    <span className="font-bold text-xs text-[#082b5c] uppercase">
-                      AI Generated Revision
-                    </span>
-                    <span className="text-[10px] text-emerald-600 font-bold uppercase">
-                      Ready to Apply
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 rounded bg-slate-50 border border-slate-200 max-h-48 overflow-y-auto text-xs leading-relaxed font-sans">
-                    {aiResult.generated}
-                  </div>
-
-                  {/* Actions: Replace, Insert, Discard */}
-                  <div className="flex items-center gap-1.5 pt-1">
-                    <button
-                      onClick={handleApplyAiResult}
-                      className="flex-1 py-1.5 rounded-lg bg-[#082f66] hover:bg-[#0d4b91] text-white font-bold text-xs transition-colors"
-                    >
-                      Replace Selected
-                    </button>
-                    <button
-                      onClick={handleInsertBelow}
-                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-700 font-semibold text-xs transition-colors"
-                      title="Insert as new paragraph below selection"
-                    >
-                      Insert Below
-                    </button>
-                    <button
-                      onClick={() => setAiResult(null)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
-                      title="Discard revision"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}

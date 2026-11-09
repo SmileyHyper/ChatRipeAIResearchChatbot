@@ -1,0 +1,72 @@
+{
+  "llmConfig": {
+    "framework": "lm-studio",
+    "baseUrl": "http://localhost:11434",
+    "model": "llama3.2:3b",
+    "pdfInputMode": "native"
+  },
+  "llmVerified": true,
+  "availableModels": [
+    "llama3.2:3b"
+  ],
+  "llmProfiles": {
+    "Default": {
+      "config": {
+        "framework": "lm-studio",
+        "baseUrl": "http://localhost:11434",
+        "model": "llama3.2:3b",
+        "pdfInputMode": "native"
+      },
+      "availableModels": [
+        "llama3.2:3b"
+      ],
+      "verified": true
+    }
+  },
+  "selectedLlmProfile": "Default",
+  "saveChatHistory": true,
+  "maxSavedChatHistories": 100,
+  "manualChatSaveFolder": "",
+  "systemPrompt": "",
+  "voiceChat": {
+    "submitOnPaste": false,
+    "submitPhrase": "",
+    "autoReadAloud": false,
+    "speechPopupCommand": "",
+    "readAloudRate": 1
+  },
+  "encryption": {
+    "enabled": false,
+    "encryptChatHistory": false,
+    "encryptWorkflowHistory": false,
+    "publicKey": "",
+    "encryptedPrivateKey": "",
+    "salt": ""
+  },
+  "editHistory": {
+    "enabled": true,
+    "diff": {
+      "contextLines": 3
+    }
+  },
+  "slashCommands": [],
+  "enabledWorkflowHotkeys": [],
+  "enabledWorkflowEventTriggers": [],
+  "workspaceFolder": "LocalLlmHub",
+  "skillsFolder": "skills",
+  "hideWorkspaceFolder": true,
+  "vaultToolAllowedFolders": [],
+  "knowledgeSources": [
+    {
+      "id": "okf",
+      "name": "OKF",
+      "path": "Knowledge",
+      "type": "okf",
+      "enabled": true
+    }
+  ],
+  "mcpServers": [],
+  "agentPlugins": [],
+  "vaultToolMode": "all",
+  "activeSkillPaths": []
+}

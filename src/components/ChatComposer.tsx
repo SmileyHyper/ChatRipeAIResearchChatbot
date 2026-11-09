@@ -1,6 +1,12 @@
 import React, { FormEvent, useRef, useEffect } from 'react';
 import type { AIProviderId, ResearchDocument } from '../types/ai';
 
+interface AttachedFile {
+  name: string;
+  mimeType: string;
+  content: string;
+}
+
 interface ChatComposerProps {
   prompt: string;
   onPromptChange: (val: string) => void;
@@ -16,6 +22,10 @@ interface ChatComposerProps {
   attachedImage?: { name: string; dataUrl: string } | null;
   imageError?: string | null;
   onImageSelect?: (file: File | null) => void;
+  attachedFile?: AttachedFile | null;
+  fileError?: string | null;
+  onFileSelect?: (file: File | null) => void;
+  onRemoveFile?: () => void;
 }
 
 export function ChatComposer({
@@ -33,9 +43,14 @@ export function ChatComposer({
   attachedImage,
   imageError,
   onImageSelect,
+  attachedFile,
+  fileError,
+  onFileSelect,
+  onRemoveFile,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -121,6 +136,36 @@ export function ChatComposer({
         )}
         {imageError && <p role="alert" className="mb-2 text-xs text-rose-600">{imageError}</p>}
 
+        {/* Attached File Badge */}
+        {attachedFile && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-[#082b5c]">
+            <span className="flex h-9 w-9 items-center justify-center rounded bg-sky-200 text-[#082b5c]">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-semibold">{attachedFile.name}</p>
+              <p className="text-[10px] text-slate-500">
+                {(attachedFile.mimeType || 'file')} • {attachedFile.content.length.toLocaleString()} chars
+              </p>
+            </div>
+            {onRemoveFile && (
+              <button
+                type="button"
+                onClick={onRemoveFile}
+                className="p-1 text-slate-400 hover:text-rose-600"
+                title="Remove file"
+                aria-label="Remove file"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+        {fileError && <p role="alert" className="mb-2 text-xs text-rose-600">{fileError}</p>}
+
         <textarea
           ref={textareaRef}
           id="prompt"
@@ -129,7 +174,7 @@ export function ChatComposer({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              if (!isStreaming && (prompt.trim() || attachedImage)) {
+              if (!isStreaming && (prompt.trim() || attachedImage || attachedFile)) {
                 onSend();
               }
             }
@@ -176,6 +221,33 @@ export function ChatComposer({
               </svg>
               Image
             </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt,.md,.csv,.json,.pdf,.docx,.doc"
+              className="hidden"
+              disabled={isStreaming}
+              onChange={(event) => {
+                onFileSelect?.(event.target.files?.[0] || null);
+                event.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isStreaming}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Attach a text/document file to include in your prompt"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="9" y1="13" x2="15" y2="13" />
+                <line x1="9" y1="17" x2="15" y2="17" />
+              </svg>
+              File
+            </button>
             {isStreaming ? (
               <button
                 type="button"
@@ -192,7 +264,7 @@ export function ChatComposer({
               <button
                 type="submit"
                 className="send cursor-pointer"
-                disabled={!prompt.trim() && !attachedImage}
+                disabled={!prompt.trim() && !attachedImage && !attachedFile}
                 aria-label="Send message"
                 title="Send message (Enter)"
               >

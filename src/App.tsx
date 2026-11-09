@@ -17,10 +17,15 @@ interface AttachedImage {
   dataUrl: string;
 }
 
+interface AttachedFile {
+  name: string;
+  mimeType: string;
+  content: string;
+}
+
 export default function App() {
   const [activeNav, setActiveNav] = useState('Chat');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // AI & Conversations State
@@ -40,18 +45,10 @@ export default function App() {
   const [attachedDocument, setAttachedDocument] = useState<ResearchDocument | null>(null);
   const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    if (activeNav === 'Chat') {
-      scrollToBottom();
-    }
-  }, [activeConv?.messages, isStreaming, activeNav]);
 
   // Initial load
   useEffect(() => {
@@ -105,6 +102,8 @@ export default function App() {
     setPrompt('');
     setAttachedImage(null);
     setImageError(null);
+    setAttachedFile(null);
+    setFileError(null);
   };
 
   // Delete Conversation
@@ -133,6 +132,8 @@ export default function App() {
     setActiveConv({ ...active });
     setAttachedImage(null);
     setImageError(null);
+    setAttachedFile(null);
+    setFileError(null);
   };
 
   // Switch Provider & Model
@@ -147,11 +148,13 @@ export default function App() {
   // Send Prompt Message
   const handleSendMessage = async (textToSend?: string) => {
     const messageText = textToSend === undefined ? prompt : textToSend;
-    if ((!messageText.trim() && !attachedImage) || isStreaming) return;
+    if ((!messageText.trim() && !attachedImage && !attachedFile) || isStreaming) return;
 
     if (attachedImage) {
       const imagePrompt = messageText.trim() || 'Describe this image.';
       setPrompt('');
+      setAttachedFile(null);
+      setFileError(null);
       setIsStreaming(true);
 
       try {
@@ -174,14 +177,23 @@ export default function App() {
       return;
     }
 
-    if (!messageText.trim()) return;
+    if (!messageText.trim() && !attachedFile) return;
+
+    // Build the final prompt, appending attached file content when present.
+    let finalPrompt = messageText.trim();
+    if (attachedFile) {
+      const fileBlock = `\n\n--- Attached file: ${attachedFile.name} (${attachedFile.mimeType}) ---\n${attachedFile.content}\n--- End of file ---`;
+      finalPrompt = finalPrompt ? `${finalPrompt}${fileBlock}` : fileBlock;
+    }
 
     setPrompt('');
+    setAttachedFile(null);
+    setFileError(null);
     setIsStreaming(true);
 
     try {
       await aiService.sendMessage(
-        messageText,
+        finalPrompt,
         {
           onStartAssistantMsg: () => {
             const active = aiService.conversationManager.getActiveConversation();
@@ -253,6 +265,55 @@ export default function App() {
     }
   };
 
+  // Attach a Text/Document File
+  const handleFileSelect = async (file: File | null) => {
+    setFileError(null);
+    if (!file) {
+      setAttachedFile(null);
+      return;
+    }
+    const allowedTypes = [
+      'text/plain', 'text/markdown', 'text/csv', 'application/json',
+      'application/pdf', 'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
+    const allowedExts = ['.txt', '.md', '.csv', '.json', '.pdf', '.docx', '.doc'];
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf('.'));
+    if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
+      setAttachedFile(null);
+      setFileError('Choose a supported file: TXT, MD, CSV, JSON, PDF, or DOCX.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAttachedFile(null);
+      setFileError('File must be 5 MB or smaller.');
+      return;
+    }
+
+    try {
+      const content = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        if (file.type === 'application/pdf' || ext === '.pdf') {
+          // PDFs are binary; we cannot reliably extract text in-browser without a library.
+          // Send a placeholder so the AI knows a PDF was attached, and surface a note.
+          resolve(`[PDF attached: ${file.name} (${file.size} bytes). Text extraction is not supported in-browser.]`);
+          return;
+        }
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read the selected file.'));
+        reader.onerror = () => reject(new Error('Could not read the selected file.'));
+        reader.readAsText(file);
+      });
+      setAttachedFile({
+        name: file.name,
+        mimeType: file.type || ext,
+        content,
+      });
+    } catch (error) {
+      setAttachedFile(null);
+      setFileError(error instanceof Error ? error.message : 'Could not read the selected file.');
+    }
+  };
+
   // Regenerate Last Assistant Message
   const handleRegenerate = async () => {
     if (isStreaming) return;
@@ -305,7 +366,7 @@ export default function App() {
     await refreshData();
   };
 
-  // Handlers for Research Library actions
+  // Handlers for  Library actions
   const handleOpenDocInEditor = (doc: ResearchDocument) => {
     setEditorDocument(doc);
     setActiveNav('Paper Editor');
@@ -327,19 +388,9 @@ export default function App() {
   const messages = activeConv?.messages || [];
 
   return (
-    <div className="app-shell" style={{ '--sidebar-width': sidebarCollapsed ? '72px' : '264px' } as React.CSSProperties}>
+    <div className="app-shell">
       {/* Mobile Toggle Button */}
-      <button
-        className="mobile-menu"
-        onClick={() => setMenuOpen(true)}
-        aria-label="Open navigation"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
-      </button>
+      {/* Removed: Now using topbar hamburger */}
 
       {/* Sidebar with Navigation & History */}
       <SidebarConversations
@@ -353,21 +404,29 @@ export default function App() {
         onCloseMenu={() => setMenuOpen(false)}
         activeNav={activeNav}
         onSelectNav={setActiveNav}
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
       {/* Main Content Area */}
       <main>
         {/* Topbar */}
         <header className="topbar">
-          <div className="breadcrumb">
-            <span>Workspace</span>
-            <i>/</i>
-            <strong>{activeNav}</strong>
+          <div className="topbar-left">
+            <button className="topbar-toggle" onClick={() => setMenuOpen(true)}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+
+            <div className="breadcrumb">
+              <span>Workspace</span>
+              <i>/</i>
+              <strong>{activeNav}</strong>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="topbar-right">
             {/* Multi-Model Selector Dropdown */}
             <ModelSelector
               currentProvider={currentProvider}
@@ -466,6 +525,10 @@ export default function App() {
                 attachedImage={attachedImage}
                 imageError={imageError}
                 onImageSelect={handleImageSelect}
+                attachedFile={attachedFile}
+                fileError={fileError}
+                onFileSelect={handleFileSelect}
+                onRemoveFile={() => setAttachedFile(null)}
               />
             </div>
           )}
@@ -491,8 +554,8 @@ export default function App() {
             />
           )}
 
-          {/* VIEW 3: RESEARCH LIBRARY */}
-          {activeNav === 'Research Library' && (
+          {/* VIEW 3: LIBRARY */}
+          {activeNav === 'Library' && (
             <ResearchLibrary
               onOpenInEditor={handleOpenDocInEditor}
               onQueryWithAI={handleQueryDocWithAI}
@@ -504,19 +567,14 @@ export default function App() {
           {activeNav === 'Paper Editor' && (
             <ResearchEditor
               initialDocument={editorDocument}
-              onBackToLibrary={() => setActiveNav('Research Library')}
+              onBackToLibrary={() => setActiveNav('Library')}
             />
           )}
 
          
           {/* Footer */}
           <footer>
-            <span>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Built for responsible scholarship
-            </span>
+
             <p>Southern Leyte State University • Research · Innovation · Publication · Extension</p>
           </footer>
         </div>

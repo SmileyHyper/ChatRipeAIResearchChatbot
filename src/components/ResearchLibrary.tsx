@@ -114,7 +114,7 @@ export function ResearchLibrary({
               </svg>
               <span>SLSU Scholarly Depository</span>
             </div>
-            <h1 className="text-2xl font-bold font-['Montserrat']">Research Library & Materials</h1>
+            <h1 className="text-2xl font-bold font-['Montserrat']">Library & Materials</h1>
             <p className="text-xs text-sky-100 max-w-xl mt-1">
               Upload, organize, annotate, and index peer-reviewed articles, dissertations, and project proposals for real-time AI citation grounding and synthesis.
             </p>

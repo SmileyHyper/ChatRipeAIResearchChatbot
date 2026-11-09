@@ -404,7 +404,7 @@ export async function handleMemoriesAndContexts(req: IncomingMessage, res: Serve
 }
 
 // ==========================================
-// 4. RESEARCH LIBRARY DOCUMENTS CONTROLLER
+// 4.  LIBRARY DOCUMENTS CONTROLLER
 // ==========================================
 export async function handleDocuments(req: IncomingMessage, res: ServerResponse, pathname: string, method: string) {
   const userId = getAuthenticatedUserId(req);
@@ -1190,7 +1190,7 @@ export async function handleChatStream(req: IncomingMessage, res: ServerResponse
     VALUES (?, ?, 'user', ?, ?, ?, ?)
   `).run(userMsgId, conversationId, lastUserMsg.content, provider, model, now);
 
-  // 3. RAG Retrieval from Research Library
+  // 3. RAG Retrieval from Library
   let retrievedChunks: any[] = [];
   try {
     retrievedChunks = searchRelevantChunks(userId, lastUserMsg.content, documentIds, 4);

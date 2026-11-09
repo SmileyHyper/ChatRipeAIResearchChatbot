@@ -37,91 +37,223 @@
 }
 
 .app-shell {
-  display: grid;
-  grid-template-columns: var(--sidebar-width, 264px) minmax(0, 1fr);
+  display: block; /* Changed from grid to block for drawer behavior */
   min-height: 100vh;
-  transition: grid-template-columns 0.3s ease;
+  background: var(--paper);
 }
 
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
-  z-index: 30;
-  width: var(--sidebar-width, 264px);
+  z-index: 50;
+  width: 320px; /* Slightly wider like GitHub drawer */
   display: flex;
   flex-direction: column;
-  padding: 26px 18px 20px;
+  padding: 0; /* Padding handled by internal containers */
   color: #f7fbff;
   background: var(--navy);
   border-right: 1px solid rgb(255 255 255 / 8%);
-  transition: width 0.3s ease;
-  overflow-x: hidden;
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 10px 0 30px rgba(0,0,0,0.3);
 }
 
-.sidebar.collapsed {
-  width: 72px;
+.sidebar.sidebar-open {
+  transform: translateX(0);
 }
 
-.sidebar.collapsed .brand-name,
-.sidebar.collapsed .brand-tag,
-.sidebar.collapsed .new-chat span,
-.sidebar.collapsed .new-chat-text,
-.sidebar.collapsed .primary-nav button span,
-.sidebar.collapsed .primary-nav button .nav-label,
-.sidebar.collapsed .recent-chats-section,
-.sidebar.collapsed .sidebar-footer button .footer-label,
-.sidebar.collapsed .profile-details {
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  background: #fff;
+  border-radius: 50%;
+  padding: 2px;
+}
+
+.brand-name {
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.brand-tag {
+  color: #91b6d6;
+  font-size: 10px;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.new-chat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  margin-bottom: 24px;
+  padding: 11px 14px;
+  color: var(--navy);
+  background: #8fd0f3;
+  border: 1px solid #8fd0f3;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  transition: background .2s, transform .2s;
+}
+
+.new-chat:hover {
+  background: #b5e2f8;
+  transform: translateY(-1px);
+}
+
+.primary-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 24px;
+}
+
+.primary-nav button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  color: #b7cce0;
+  border-radius: 7px;
+  font-size: 13px;
+  transition: color .2s, background .2s;
+}
+
+.primary-nav button:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+}
+
+.primary-nav button.active {
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+  font-weight: 600;
+  box-shadow: inset 3px 0 var(--sky);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(5, 30, 65, 0.46);
+  backdrop-filter: blur(2px);
   display: none;
 }
 
-.sidebar.collapsed .brand-row {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
+.scrim.visible {
+  display: block;
 }
 
-.sidebar.collapsed .new-chat {
-  width: 42px;
-  height: 42px;
-  padding: 0;
-  margin: 0 auto;
+main {
+  width: 100%;
+  transition: padding-left 0.3s ease;
 }
 
-.sidebar.collapsed .primary-nav button {
-  justify-content: center;
-  padding: 10px;
-}
-
-.sidebar.collapsed .profile {
+.topbar {
+  height: 66px;
+  padding: 0 24px;
   display: flex;
-  justify-content: center;
-  padding: 8px 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: rgb(245 248 252 / 90%);
+  backdrop-filter: blur(12px);
 }
 
-.sidebar-toggle-desktop {
-  position: absolute;
-  top: 18px;
-  right: -12px;
-  width: 24px;
-  height: 24px;
-  background: var(--sky);
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.topbar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
   color: var(--navy);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.topbar-toggle:hover {
+  background: #f1f5f9;
+}
+
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.sidebar-footer button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 12px;
+  color: #b7cce0;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.sidebar-footer button:hover {
+  color: #fff;
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 13px;
+  padding: 8px 12px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
+  background: #8fd0f3;
+  color: var(--navy);
   display: grid;
   place-items: center;
-  cursor: pointer;
-  z-index: 40;
-  border: 2px solid var(--navy);
-  transition: transform 0.2s ease;
-}
-
-.sidebar-toggle-desktop:hover {
-  transform: scale(1.1);
-}
-
-.sidebar.collapsed .sidebar-toggle-desktop {
-  right: 12px;
-  top: 75px;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 
@@ -792,3 +924,29 @@ footer span {
 }
 .diff-added { @apply bg-emerald-950 text-emerald-200 px-1 rounded; }
 .diff-removed { @apply bg-rose-950 text-rose-200 px-1 rounded line-through; }
+
+/* Grammarly-like Diff & Tooltip */
+.grammarly-diff-wrapper {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.grammarly-diff-wrapper:hover .grammarly-tooltip {
+  display: flex !important;
+}
+
+.grammarly-tooltip {
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.grammarly-diff-wrapper del {
+  text-decoration: line-through;
+  text-decoration-color: #f43f5e;
+  text-decoration-thickness: 2px;
+}
+
+.grammarly-diff-wrapper ins {
+  text-decoration: none;
+  font-weight: 600;
+}

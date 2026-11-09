@@ -134,6 +134,12 @@ export function ResearchEditor({ initialDocument, onBackToLibrary }: ResearchEdi
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [humanize, setHumanize] = useState(true);
+  const [copilotTheme, setCopilotTheme] = useState<'light' | 'dark'>('light');
+
+  // Grammarly-like Diff State
+  const [diffs, setDiffs] = useState<Array<{ id: string; oldText: string; newText: string; range: Range }>>([]);
+  const [humanScore, setHumanScore] = useState<number | null>(null);
+  const [isScoring, setIsScoring] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -594,16 +600,137 @@ const normalizeBlocks = () => {
     }
   };
 
-  const applyText = (generated: string, mode: 'replace' | 'below') => {
+  const applyDiff = (originalText: string, suggestedText: string) => {
     restoreSelection();
-    const html = plainTextToHtml(generated);
-    if (!(mode === 'replace' && selectedText)) {
-      // collapse to the end of the selection/caret and insert after it
-      window.getSelection()?.collapseToEnd();
-    }
-    executeCommand('insertHTML', html);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+
+    const range = sel.getRangeAt(0);
+    const diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+
+    // Create wrapper container for inline visual diff
+    const span = document.createElement('span');
+    span.id = diffId;
+    span.className = 'grammarly-diff-wrapper relative inline-block group cursor-pointer';
+
+    span.innerHTML = `
+      <del class="diff-removed bg-rose-100 text-rose-800 line-through px-1 rounded mr-1 select-none">${escapeHtml(originalText || selectedText)}</del>
+      <ins class="diff-added bg-emerald-100 text-emerald-800 no-underline px-1 rounded font-semibold">${escapeHtml(suggestedText)}</ins>
+
+      <span class="grammarly-tooltip hidden group-hover:flex absolute bottom-full left-1/2 -translate-x-1/2 mb-1 bg-slate-900 text-white text-[10px] rounded p-1.5 shadow-xl z-30 gap-1 font-sans">
+        <button type="button" class="accept-btn bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-2 py-0.5 rounded">Accept</button>
+        <button type="button" class="dismiss-btn bg-slate-700 hover:bg-slate-600 text-slate-200 px-2 py-0.5 rounded">Dismiss</button>
+      </span>
+    `;
+
+    range.deleteContents();
+    range.insertNode(span);
+
+    // Bind local click handlers for inline accept/dismiss
+    const acceptBtn = span.querySelector('.accept-btn');
+    const dismissBtn = span.querySelector('.dismiss-btn');
+
+    const handleAccept = (e: Event) => {
+      e.stopPropagation();
+      acceptDiff(diffId, suggestedText);
+    };
+
+    const handleDismiss = (e: Event) => {
+      e.stopPropagation();
+      dismissDiff(diffId, originalText || selectedText);
+    };
+
+    acceptBtn?.addEventListener('click', handleAccept);
+    dismissBtn?.addEventListener('click', handleDismiss);
+
+    setDiffs((prev) => [...prev, { id: diffId, oldText: originalText || selectedText, newText: suggestedText, range }]);
     setSelectedText('');
     savedRange.current = null;
+    updateCounts();
+  };
+
+  const acceptDiff = (id: string, newText: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const textNode = document.createTextNode(newText);
+    el.parentNode?.replaceChild(textNode, el);
+    setDiffs((prev) => prev.filter((d) => d.id !== id));
+    updateCounts();
+    scoreHuman(editorRef.current?.innerText || '');
+  };
+
+  const dismissDiff = (id: string, oldText: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const textNode = document.createTextNode(oldText);
+    el.parentNode?.replaceChild(textNode, el);
+    setDiffs((prev) => prev.filter((d) => d.id !== id));
+    updateCounts();
+    scoreHuman(editorRef.current?.innerText || '');
+  };
+
+  const handleAcceptAll = () => {
+    diffs.forEach((d) => acceptDiff(d.id, d.newText));
+    scoreHuman(editorRef.current?.innerText || '');
+  };
+
+  const handleDismissAll = () => {
+    diffs.forEach((d) => dismissDiff(d.id, d.oldText));
+    scoreHuman(editorRef.current?.innerText || '');
+  };
+
+  // ---------- Human Score Engine ----------
+  const calculateHumanScore = (text: string): number => {
+    if (!text || !text.trim()) return 0;
+    const words = text.trim().split(/\s+/).length;
+    if (words < 10) return 60;
+
+    const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 3).length || 1;
+    const avgSentenceLen = words / sentences;
+
+    const fillerPhrases = [
+      'delve into', 'it is important to note', 'in today\'s world', 'plays a crucial role',
+      'moreover', 'furthermore', 'in conclusion', 'tapestry', 'landscape', 'underscores',
+      'it is worth noting', 'it should be noted', 'a testament to', 'the realm of',
+      'it is evident that', 'in light of the fact that'
+    ];
+    const lowerText = text.toLowerCase();
+    const fillerCount = fillerPhrases.filter((p) => lowerText.includes(p)).length;
+
+    const passiveMatches = text.match(/\b(is|are|was|were|been|being)\s+\w+ed\b/gi) || [];
+    const passiveRatio = passiveMatches.length / sentences;
+
+    let score = 100;
+    score -= fillerCount * 12;
+    score -= passiveRatio * 30;
+    if (avgSentenceLen < 10) score -= 15;
+    if (avgSentenceLen > 30) score -= 10;
+
+    const uniqueWords = new Set(text.toLowerCase().match(/\b[a-z]{4,}\b/g) || []).size;
+    const vocabularyDiversity = uniqueWords / words;
+    score += (vocabularyDiversity - 0.4) * 25;
+
+    return Math.max(0, Math.min(100, Math.round(score)));
+  };
+
+  const scoreHuman = async (text: string) => {
+    if (!text || !text.trim()) {
+      setHumanScore(0);
+      return;
+    }
+    setIsScoring(true);
+    // Simulate async scoring delay for smooth animation
+    await new Promise((r) => setTimeout(r, 350));
+    const score = calculateHumanScore(text);
+    setHumanScore(score);
+    setIsScoring(false);
+  };
+
+  const getScoreColor = (score: number | null): string => {
+    if (score === null) return '#64748b';
+    if (score < 40) return '#ef4444';
+    if (score <= 70) return '#f59e0b';
+    return '#22c55e';
   };
 
   const stackHeight = pageCount * PAGE_PERIOD - PAGE_GAP;
@@ -615,13 +742,13 @@ const normalizeBlocks = () => {
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden animate-in fade-in duration-200">
-      {/* Top Application Bar - Slimmed to 56px */}
-      <div className="flex items-center justify-between px-4 h-14 bg-[#082b5c] text-white border-b border-[#0f3b75] shrink-0">
+      {/* Top Application Bar - Integrated with breadcrumbs for a unified look */}
+      <div className="flex items-center justify-between px-4 h-14 bg-white border-b border-slate-200 shrink-0">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
             onClick={onBackToLibrary}
-            className="p-2 rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors h-9 w-9 flex items-center justify-center"
-            title="Back to Research Library"
+            className="p-2 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors h-9 w-9 flex items-center justify-center"
+            title="Back to Library"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="19" y1="12" x2="5" y2="12" />
@@ -629,42 +756,45 @@ const normalizeBlocks = () => {
             </svg>
           </button>
 
-          <div className="flex flex-col flex-1 max-w-md">
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                setSaveStatus('unsaved');
-              }}
-              readOnly={isPdfPreview}
-              placeholder="Paper Title..."
-              className="bg-transparent font-bold text-sm text-white focus:bg-white/10 px-2 py-0.5 rounded outline-none border border-transparent focus:border-sky-400"
-            />
-            <span className="text-[10px] text-sky-200/70 pl-2 leading-none">
-              {isPdfPreview ? 'PDF Preview • Read-only' : 'Microsoft Word-Style Research Editor • SLSU Format'}
+        </div>
+
+        {/* Global Controls & Status */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200">
+            <div className={`w-2 h-2 rounded-full ${saveStatus === 'saved' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+              {saveStatus === 'saved' ? 'All changes saved' : 'Unsaved changes'}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* Editor Context Bar (Previously Dark Header) - Now integrated cleanly */}
+      <div className="bg-[#082b5c] text-white px-4 py-3 shrink-0 flex items-center justify-between">
+        <div className="flex flex-col min-w-0">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setSaveStatus('unsaved');
+            }}
+            readOnly={isPdfPreview}
+            className="bg-transparent font-bold text-lg text-white outline-none border-b border-transparent focus:border-sky-400"
+          />
+          <span className="text-[11px] text-sky-200 mt-0.5">
+            {isPdfPreview ? 'PDF Preview' : 'Microsoft Word-Style Paper Editor'}
+          </span>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
           {!isPdfPreview && (
             <>
-              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                saveStatus === 'saved' ? 'text-emerald-400' : 'text-amber-400'
-              }`}>
-                {saveStatus === 'saved' ? 'SAVED ✓' : saveStatus === 'saving' ? 'SAVING...' : 'UNSAVED'}
-              </span>
-
               <button
                 onClick={() => setTemplatesOpen(true)}
                 className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                </svg>
                 <span>Templates</span>
               </button>
 
@@ -673,38 +803,33 @@ const normalizeBlocks = () => {
                 onClick={() => importFileInputRef.current?.click()}
                 className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors border border-white/10"
               >
-                Import DOCX
+                Import
               </button>
 
               <button
                 onClick={handleSaveDocument}
-                className="h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all"
+                className="h-9 px-6 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold shadow-sm transition-all"
               >
                 Save
               </button>
 
               <button
                 onClick={handleOpenVersions}
-                className="h-9 w-9 flex items-center justify-center rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors border border-white/10"
-                title="Version history"
+                className="h-9 w-9 flex items-center justify-center rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors"
+                title="History"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-                  <path d="M3 3v5h5M12 7v5l3 2" />
-                </svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" /></svg>
               </button>
             </>
           )}
 
           <button
             onClick={() => setAiAssistantOpen(!aiAssistantOpen)}
-            className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${
-              aiAssistantOpen ? 'bg-sky-400 text-[#082b5c] border-sky-400' : 'bg-white/10 text-white hover:bg-white/20 border-white/10'
+            className={`h-9 px-4 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors ${
+              aiAssistantOpen ? 'bg-sky-400 text-[#082b5c]' : 'bg-white/10 text-white hover:bg-white/20'
             }`}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8z" />
-            </svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8z" /></svg>
             <span>AI Assistant</span>
           </button>
         </div>
@@ -881,9 +1006,202 @@ const normalizeBlocks = () => {
 
       )}
 
-      {/* Editor Body: Canvas on Left + AI Assistant on Right */}
+      {/* Editor Body: AI Sidebar on Left + Paper on Right */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Main Writing Canvas: stack of Letter-size pages */}
+        {/* AI Research Writing Assistant Panel (Left Sidebar) */}
+        {aiAssistantOpen && (
+          <div className={`w-[380px] flex-none flex flex-col h-full shadow-2xl z-10 animate-in slide-in-from-left-4 duration-200 ${copilotTheme === 'dark' ? 'bg-[#1e1e1e] text-[#cccccc] border-r border-[#333333]' : 'bg-slate-50 text-slate-800 border-r border-slate-300'}`}>
+            <div className={`flex items-center justify-between px-3 py-2 ${copilotTheme === 'dark' ? 'bg-[#252526] border-b border-[#333333]' : 'bg-slate-100 border-b border-slate-300'}`}>
+              <div className="flex items-center gap-2">
+                <span className={`${copilotTheme === 'dark' ? 'text-[#007acc]' : 'text-[#082b5c]'} font-mono font-bold text-xs`}>⚡ AI COPILOT</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCopilotTheme(copilotTheme === 'light' ? 'dark' : 'light')}
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${copilotTheme === 'dark' ? 'hover:bg-[#3c3c3c]' : 'hover:bg-slate-200'}`}
+                  title={`Switch to ${copilotTheme === 'light' ? 'Dark' : 'Light'} Mode`}
+                >
+                  {copilotTheme === 'light' ? '🌙' : '☀️'}
+                </button>
+                <select
+                  value={aiProvider}
+                  onChange={(e) => setAiProvider(e.target.value as AIProviderId)}
+                  className={`${copilotTheme === 'dark' ? 'bg-[#3c3c3c] text-[#cccccc] border-[#555555]' : 'bg-white text-slate-700 border-slate-300'} font-mono text-[10px] border rounded px-1 py-0.5 outline-none`}
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="claude">Claude</option>
+                </select>
+                <button
+                  onClick={() => setAiAssistantOpen(false)}
+                  className="text-[#969696] hover:text-rose-500 text-xs px-1"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col min-h-0 text-xs font-mono">
+              <div className={`flex items-center gap-2 px-3 py-1 ${copilotTheme === 'dark' ? 'bg-[#2d2d2d] text-[#969696]' : 'bg-slate-200 text-slate-600'} text-[10px] font-bold uppercase tracking-wider cursor-pointer hover:opacity-90`}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>CONTEXT: {selectedText ? 'SELECTION' : 'FULL FILE'}</span>
+              </div>
+
+              <div className={`p-2 ${copilotTheme === 'dark' ? 'bg-[#1e1e1e] border-b border-[#2d2d2d]' : 'bg-white border-b border-slate-200'} text-[11px]`}>
+                <div className={`${copilotTheme === 'dark' ? 'text-[#6a9955]' : 'text-emerald-700'} truncate`}>
+                  // {title} ({category})
+                </div>
+                {selectedText && (
+                  <div className={`mt-1 p-1.5 rounded border ${copilotTheme === 'dark' ? 'bg-[#252526] border-[#3c3c3c] text-[#ce9178]' : 'bg-slate-100 border-slate-200 text-slate-700'} max-h-16 overflow-y-auto`}>
+                    "{selectedText}"
+                  </div>
+                )}
+              </div>
+
+              {/* Human Score Ring */}
+              <div className={`flex items-center justify-between px-3 py-2 ${copilotTheme === 'dark' ? 'bg-[#252526]' : 'bg-slate-50'}`}>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Human-like Score</span>
+                <div className="relative w-14 h-14 flex items-center justify-center">
+                  <svg className="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+                    <circle
+                      cx="28" cy="28" r="24"
+                      fill="none"
+                      stroke={copilotTheme === 'dark' ? '#3c3c3c' : '#e2e8f0'}
+                      strokeWidth="5"
+                    />
+                    <circle
+                      cx="28" cy="28" r="24"
+                      fill="none"
+                      stroke={humanScore === null ? (copilotTheme === 'dark' ? '#569cd6' : '#082b5c') : getScoreColor(humanScore)}
+                      strokeWidth="5"
+                      strokeDasharray="150.8"
+                      strokeDashoffset={150.8 - (150.8 * (humanScore || 0)) / 100}
+                      strokeLinecap="round"
+                      className="transition-all duration-700 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    {isScoring ? (
+                      <span className="text-[10px] font-bold animate-pulse text-slate-400">...</span>
+                    ) : humanScore !== null ? (
+                      <>
+                        <span className="text-base font-bold" style={{ color: getScoreColor(humanScore) }}>{humanScore}%</span>
+                        <span className="text-[7px] text-slate-400 font-bold uppercase">Human</span>
+                      </>
+                    ) : (
+                      <span className="text-[7px] text-slate-400 font-bold uppercase">N/A</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => scoreHuman(selectedText || editorRef.current?.innerText || '')}
+                  className="text-[9px] px-2 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold"
+                >
+                  {isScoring ? '...' : 'Score'}
+                </button>
+              </div>
+
+              <div className={`flex items-center gap-2 px-3 py-1 ${copilotTheme === 'dark' ? 'bg-[#2d2d2d] text-[#969696]' : 'bg-slate-200 text-slate-600'} text-[10px] font-bold uppercase tracking-wider`}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                <span>TERMINAL</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-3 font-sans">
+                {chat.length === 0 && (
+                  <div className={`text-center py-8 space-y-2 font-mono text-[11px] ${copilotTheme === 'dark' ? 'text-[#6e7681]' : 'text-slate-500'}`}>
+                    <p className={copilotTheme === 'dark' ? 'text-[#569cd6]' : 'text-[#082b5c]'}>&gt; Copilot ready.</p>
+                    <p>Enter a prompt below to synthesize research.</p>
+                  </div>
+                )}
+
+                {chat.map((m, i) => (
+                  <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[9px] font-mono text-[#6e7681] mb-1">
+                      {m.role === 'user' ? 'USER' : 'AI'}
+                    </span>
+                    <div
+                      className={`rounded-md p-3 text-sm leading-relaxed mb-4 ${
+                        m.role === 'user'
+                          ? 'bg-[#0e639c] text-white self-end'
+                          : m.error
+                          ? 'bg-rose-100 border border-rose-300 text-rose-800'
+                          : copilotTheme === 'dark'
+                            ? 'bg-[#2d2d2d] border border-[#454545] text-[#cccccc]'
+                            : 'bg-white border border-slate-300'
+                      }`}
+                    >
+                      {m.content}
+                      {m.role === 'assistant' && !m.error && (
+                        <div className={`flex items-center gap-2 mt-3 pt-2 border-t ${copilotTheme === 'dark' ? 'border-[#454545]' : 'border-slate-200'}`}>
+                          <button
+                            onClick={() => applyDiff(selectedText, m.content)}
+                            className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[10px] font-bold"
+                          >
+                            APPLY
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {isAiGenerating && (
+                  <div className={`flex items-center gap-2 font-mono text-[11px] animate-pulse ${copilotTheme === 'dark' ? 'text-[#569cd6]' : 'text-sky-700'}`}>
+                    <span className="inline-block w-2 h-2 rounded-full bg-current"></span>
+                    Generating...
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              <div className={`p-3 ${copilotTheme === 'dark' ? 'bg-[#252526] border-t border-[#333333]' : 'bg-slate-100 border-t border-slate-200'} space-y-2`}>
+                {diffs.length > 0 && (
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-slate-500">{diffs.length} Pending Suggestion(s)</span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={handleAcceptAll}
+                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[9px] font-bold"
+                      >
+                        Accept All
+                      </button>
+                      <button
+                        onClick={handleDismissAll}
+                        className="px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 text-white font-mono text-[9px]"
+                      >
+                        Dismiss All
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <textarea
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendChat();
+                      }
+                    }}
+                    rows={2}
+                    placeholder="Enter command..."
+                    className={`w-full font-mono text-xs rounded px-2 py-1.5 focus:outline-none ${copilotTheme === 'dark' ? 'bg-[#3c3c3c] text-white focus:border-[#007acc]' : 'bg-white text-slate-800 border-slate-300 border focus:border-[#082b5c]'}`}
+                  />
+                  <button
+                    onClick={() => handleSendChat()}
+                    disabled={isAiGenerating || !chatInput.trim()}
+                    className="px-3 bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-40 text-white rounded font-bold font-mono text-xs"
+                  >
+                    ▶
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Main Writing Canvas */}
         <div className="flex-1 overflow-auto bg-slate-100 p-8 flex justify-center">
           <div className="flex flex-col" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
             <div className="ruler-horizontal w-[816px] mb-4">
@@ -921,12 +1239,6 @@ const normalizeBlocks = () => {
                     className="absolute bg-white shadow-2xl border border-slate-300 rounded-sm select-none pointer-events-none page-shadow"
                     style={{ left: 0, top: i * PAGE_PERIOD, width: PAGE_W, height: PAGE_H }}
                   >
-                    <div
-                      className="absolute text-center text-[10px] text-slate-400 font-mono border-t border-slate-100 pt-1"
-                      style={{ left: margin, right: margin, bottom: Math.max(12, margin / 2 - 14) }}
-                    >
-                      Southern Leyte State University — Center for Research &amp; Innovation
-                    </div>
                   </div>
                 ))}
 
@@ -960,26 +1272,32 @@ const normalizeBlocks = () => {
           </div>
         </div>
 
-        {/* AI Research Writing Assistant Panel (IDE Style) */}
-        {aiAssistantOpen && (
-          <div className="w-[380px] ide-sidebar border-l border-[#333333] flex flex-col h-full shadow-2xl z-10 animate-in slide-in-from-right-4 duration-200">
-            <div className="ide-header">
+        {/* AI Research Writing Assistant Panel (No longer needed - moved to left) */}
+        {false && (
+          <div>
+            <div className={`flex items-center justify-between px-3 py-2 ${copilotTheme === 'dark' ? 'bg-[#252526] border-b border-[#333333]' : 'bg-slate-100 border-b border-slate-300'}`}>
               <div className="flex items-center gap-2">
-                <span className="text-[#007acc] font-mono font-bold text-xs">⚡ AI COPILOT</span>
-                <span className="text-[10px] bg-[#3c3c3c] text-[#cccccc] px-1.5 py-0.5 rounded font-mono">v1.0</span>
+                <span className={`${copilotTheme === 'dark' ? 'text-[#007acc]' : 'text-[#082b5c]'} font-mono font-bold text-xs`}>⚡ AI COPILOT</span>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCopilotTheme(copilotTheme === 'light' ? 'dark' : 'light')}
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${copilotTheme === 'dark' ? 'hover:bg-[#3c3c3c]' : 'hover:bg-slate-200'}`}
+                  title={`Switch to ${copilotTheme === 'light' ? 'Dark' : 'Light'} Mode`}
+                >
+                  {copilotTheme === 'light' ? '🌙' : '☀️'}
+                </button>
                 <select
                   value={aiProvider}
                   onChange={(e) => setAiProvider(e.target.value as AIProviderId)}
-                  className="bg-[#3c3c3c] text-[#cccccc] font-mono text-[10px] border border-[#555555] rounded px-1 py-0.5 outline-none"
+                  className={`${copilotTheme === 'dark' ? 'bg-[#3c3c3c] text-[#cccccc] border-[#555555]' : 'bg-white text-slate-700 border-slate-300'} font-mono text-[10px] border rounded px-1 py-0.5 outline-none`}
                 >
-                  <option value="ollama">Ollama (Local)</option>
-                  <option value="claude">Claude (Cloud)</option>
+                  <option value="ollama">Ollama</option>
+                  <option value="claude">Claude</option>
                 </select>
                 <button
                   onClick={() => setAiAssistantOpen(false)}
-                  className="text-[#969696] hover:text-white text-xs px-1"
+                  className="text-[#969696] hover:text-rose-500 text-xs px-1"
                 >
                   ✕
                 </button>
@@ -987,79 +1305,102 @@ const normalizeBlocks = () => {
             </div>
 
             <div className="flex-1 flex flex-col min-h-0 text-xs font-mono">
-              {/* Active Context / Scope Info */}
-              <div className="ide-section-header">
+              <div className={`flex items-center gap-2 px-3 py-1 ${copilotTheme === 'dark' ? 'bg-[#2d2d2d] text-[#969696]' : 'bg-slate-200 text-slate-600'} text-[10px] font-bold uppercase tracking-wider cursor-pointer hover:opacity-90`}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 <span>CONTEXT: {selectedText ? 'SELECTION' : 'FULL FILE'}</span>
               </div>
 
-              <div className="p-2 bg-[#1e1e1e] border-b border-[#2d2d2d] text-[11px]">
-                <div className="text-[#6a9955] truncate">
+              <div className={`p-2 ${copilotTheme === 'dark' ? 'bg-[#1e1e1e] border-b border-[#2d2d2d]' : 'bg-white border-b border-slate-200'} text-[11px]`}>
+                <div className={`${copilotTheme === 'dark' ? 'text-[#6a9955]' : 'text-emerald-700'} truncate`}>
                   // {title} ({category})
                 </div>
                 {selectedText && (
-                  <div className="mt-1 p-1.5 bg-[#252526] rounded border border-[#3c3c3c] text-[#ce9178] max-h-16 overflow-y-auto">
+                  <div className={`mt-1 p-1.5 rounded border ${copilotTheme === 'dark' ? 'bg-[#252526] border-[#3c3c3c] text-[#ce9178]' : 'bg-slate-100 border-slate-200 text-slate-700'} max-h-16 overflow-y-auto`}>
                     "{selectedText}"
                   </div>
                 )}
               </div>
 
-              {/* Console / Chat Log */}
-              <div className="ide-section-header">
+              {/* Human Score Ring */}
+              <div className={`flex items-center justify-between px-3 py-2 ${copilotTheme === 'dark' ? 'bg-[#252526]' : 'bg-slate-50'}`}>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Human-like Score</span>
+                <div className="relative w-14 h-14 flex items-center justify-center">
+                  <svg className="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
+                    <circle
+                      cx="28" cy="28" r="24"
+                      fill="none"
+                      stroke={copilotTheme === 'dark' ? '#3c3c3c' : '#e2e8f0'}
+                      strokeWidth="5"
+                    />
+                    <circle
+                      cx="28" cy="28" r="24"
+                      fill="none"
+                      stroke={humanScore === null ? (copilotTheme === 'dark' ? '#569cd6' : '#082b5c') : getScoreColor(humanScore)}
+                      strokeWidth="5"
+                      strokeDasharray="150.8"
+                      strokeDashoffset={150.8 - (150.8 * (humanScore || 0)) / 100}
+                      strokeLinecap="round"
+                      className="transition-all duration-700 ease-out"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    {isScoring ? (
+                      <span className="text-[10px] font-bold animate-pulse text-slate-400">...</span>
+                    ) : humanScore !== null ? (
+                      <>
+                        <span className="text-base font-bold" style={{ color: getScoreColor(humanScore) }}>{humanScore}%</span>
+                        <span className="text-[7px] text-slate-400 font-bold uppercase">Human</span>
+                      </>
+                    ) : (
+                      <span className="text-[7px] text-slate-400 font-bold uppercase">N/A</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => scoreHuman(selectedText || editorRef.current?.innerText || '')}
+                  className="text-[9px] px-2 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold"
+                >
+                  {isScoring ? '...' : 'Score'}
+                </button>
+              </div>
+
+              <div className={`flex items-center gap-2 px-3 py-1 ${copilotTheme === 'dark' ? 'bg-[#2d2d2d] text-[#969696]' : 'bg-slate-200 text-slate-600'} text-[10px] font-bold uppercase tracking-wider`}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                <span>TERMINAL OUTPUT</span>
+                <span>TERMINAL</span>
               </div>
 
               <div className="flex-1 overflow-y-auto p-3 space-y-3 font-sans">
                 {chat.length === 0 && (
-                  <div className="text-center text-[#6e7681] py-8 space-y-2 font-mono text-[11px]">
-                    <p className="text-[#569cd6]">&gt; Copilot initialized.</p>
-                    <p>Ready to assist with scholarly drafting, formatting, and humanization.</p>
-                    <div className="mt-4 pt-4 border-t border-[#2d2d2d] text-left text-[10px] text-[#8b949e]">
-                      <p className="font-bold text-[#c9d1d9] mb-1">PROMPT SUGGESTIONS:</p>
-                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Refine tone for academic publication')}>• Refine tone for academic publication</p>
-                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Summarize key methodology points')}>• Summarize key methodology points</p>
-                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Check for passive voice overuse')}>• Check for passive voice overuse</p>
-                    </div>
+                  <div className={`text-center py-8 space-y-2 font-mono text-[11px] ${copilotTheme === 'dark' ? 'text-[#6e7681]' : 'text-slate-500'}`}>
+                    <p className={copilotTheme === 'dark' ? 'text-[#569cd6]' : 'text-[#082b5c]'}>&gt; Copilot ready.</p>
+                    <p>Enter a prompt below to synthesize research.</p>
                   </div>
                 )}
 
                 {chat.map((m, i) => (
                   <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                     <span className="text-[9px] font-mono text-[#6e7681] mb-1">
-                      {m.role === 'user' ? 'USER@EDITOR' : 'COPILOT@AI'}
+                      {m.role === 'user' ? 'USER' : 'AI'}
                     </span>
                     <div
-                      className={`ide-chat-bubble ${
+                      className={`rounded-md p-3 text-sm leading-relaxed mb-4 ${
                         m.role === 'user'
-                          ? 'ide-chat-bubble-user'
+                          ? 'bg-[#0e639c] text-white self-end'
                           : m.error
-                          ? 'bg-[#5a1d1d] border border-[#be1111] text-[#f87171]'
-                          : 'ide-chat-bubble-ai'
+                          ? 'bg-rose-100 border border-rose-300 text-rose-800'
+                          : copilotTheme === 'dark'
+                            ? 'bg-[#2d2d2d] border border-[#454545] text-[#cccccc]'
+                            : 'bg-white border border-slate-300'
                       }`}
                     >
-                      {m.error ? `[ERROR] ${m.content}` : m.content}
+                      {m.content}
                       {m.role === 'assistant' && !m.error && (
-                        <div className="flex items-center gap-2 mt-3 pt-2 border-t border-[#454545]">
+                        <div className={`flex items-center gap-2 mt-3 pt-2 border-t ${copilotTheme === 'dark' ? 'border-[#454545]' : 'border-slate-200'}`}>
                           <button
-                            onClick={() => applyText(m.content, 'replace')}
-                            className="px-2 py-0.5 rounded bg-[#0e639c] hover:bg-[#1177bb] text-white font-mono text-[10px] font-bold"
+                            onClick={() => applyDiff(selectedText, m.content)}
+                            className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[10px] font-bold"
                           >
-                            {selectedText ? 'ACCEPT (Replace)' : 'INSERT AT CURSOR'}
-                          </button>
-                          {selectedText && (
-                            <button
-                              onClick={() => applyText(m.content, 'below')}
-                              className="px-2 py-0.5 rounded bg-[#3c3c3c] hover:bg-[#4c4c4c] text-[#cccccc] font-mono text-[10px]"
-                            >
-                              INSERT BELOW
-                            </button>
-                          )}
-                          <button
-                            onClick={() => navigator.clipboard.writeText(m.content)}
-                            className="px-2 py-0.5 rounded bg-[#3c3c3c] hover:bg-[#4c4c4c] text-[#cccccc] font-mono text-[10px]"
-                          >
-                            COPY
+                            APPLY
                           </button>
                         </div>
                       )}
@@ -1068,34 +1409,36 @@ const normalizeBlocks = () => {
                 ))}
 
                 {isAiGenerating && (
-                  <div className="flex items-center gap-2 text-[#569cd6] font-mono text-[11px] animate-pulse">
-                    <span className="inline-block w-2 h-2 rounded-full bg-[#569cd6]"></span>
-                    {humanize ? 'Humanizing scholarly text...' : 'Generating code/text...'}
+                  <div className={`flex items-center gap-2 font-mono text-[11px] animate-pulse ${copilotTheme === 'dark' ? 'text-[#569cd6]' : 'text-sky-700'}`}>
+                    <span className="inline-block w-2 h-2 rounded-full bg-current"></span>
+                    Generating...
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
-              {/* IDE Input Controls */}
-              <div className="ide-input-container space-y-2">
-                <div className="flex items-center justify-between text-[10px] text-[#969696]">
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={humanize}
-                      onChange={(e) => setHumanize(e.target.checked)}
-                      className="rounded bg-[#3c3c3c] border-[#555555] accent-[#007acc]"
-                    />
-                    <span>Humanize AI Drafts</span>
-                  </label>
-                  {chat.length > 0 && (
-                    <button onClick={() => setChat([])} className="hover:text-rose-400">
-                      Clear Output
-                    </button>
-                  )}
-                </div>
+              <div className={`p-3 ${copilotTheme === 'dark' ? 'bg-[#252526] border-t border-[#333333]' : 'bg-slate-100 border-t border-slate-200'} space-y-2`}>
+                {diffs.length > 0 && (
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] font-bold text-slate-500">{diffs.length} Pending Suggestion(s)</span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={handleAcceptAll}
+                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-[9px] font-bold"
+                      >
+                        Accept All
+                      </button>
+                      <button
+                        onClick={handleDismissAll}
+                        className="px-2 py-0.5 rounded bg-slate-600 hover:bg-slate-500 text-white font-mono text-[9px]"
+                      >
+                        Dismiss All
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
@@ -1106,13 +1449,13 @@ const normalizeBlocks = () => {
                       }
                     }}
                     rows={2}
-                    placeholder="Enter prompt or command (e.g. /humanize)..."
-                    className="ide-input font-mono text-xs resize-none"
+                    placeholder="Enter command..."
+                    className={`w-full font-mono text-xs rounded px-2 py-1.5 focus:outline-none ${copilotTheme === 'dark' ? 'bg-[#3c3c3c] text-white focus:border-[#007acc]' : 'bg-white text-slate-800 border-slate-300 border focus:border-[#082b5c]'}`}
                   />
                   <button
                     onClick={() => handleSendChat()}
                     disabled={isAiGenerating || !chatInput.trim()}
-                    className="px-3 bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-40 text-white rounded font-bold font-mono text-xs flex items-center justify-center"
+                    className="px-3 bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-40 text-white rounded font-bold font-mono text-xs"
                   >
                     ▶
                   </button>

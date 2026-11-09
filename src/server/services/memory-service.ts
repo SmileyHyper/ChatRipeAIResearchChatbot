@@ -203,7 +203,7 @@ export function constructEnrichedSystemPrompt(params: {
 
   // 3. Inject RAG Retrieved Document Content
   if (retrievedChunks && retrievedChunks.length > 0) {
-    enriched += '\n\n### RETRIEVED RESEARCH LIBRARY DOCUMENTS (RAG GROUNDING):';
+    enriched += '\n\n### RETRIEVED LIBRARY DOCUMENTS (RAG GROUNDING):';
     enriched += '\nYou MUST prioritize the following verified research excerpts in your response. Cite the source document title whenever referencing findings. Do NOT fabricate citations or claim that a document contains information that is not present in these excerpts:';
 
     retrievedChunks.forEach((chunk, index) => {

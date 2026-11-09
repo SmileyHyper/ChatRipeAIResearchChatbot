@@ -15,6 +15,7 @@ export class AIService {
   private userSettings: UserProviderSettings = {
     enableMemory: true,
   };
+  private imageAbortController: AbortController | null = null;
 
   constructor() {
     this.providerManager = new ProviderManager();
@@ -29,7 +30,9 @@ export class AIService {
     try {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
-        this.userSettings = { enableMemory: true, ...JSON.parse(raw) };
+        const savedSettings = JSON.parse(raw);
+        delete savedSettings.geminiApiKey;
+        this.userSettings = { enableMemory: true, ...savedSettings };
       }
     } catch {
       this.userSettings = { enableMemory: true };
@@ -48,6 +51,53 @@ export class AIService {
 
   getSettings(): UserProviderSettings {
     return { ...this.userSettings };
+  }
+
+  async analyzeImage(imageBase64: string, mimeType: string, prompt: string): Promise<string> {
+    const conversation = this.conversationManager.getActiveConversation();
+    const userMessage = `${prompt.trim()}\n\n[Image attached]`;
+    this.conversationManager.addUserMessage(userMessage);
+    const assistantMessage = this.conversationManager.addAssistantMessage('', 'ollama', 'qwen3-vl:8b');
+    const controller = new AbortController();
+    this.imageAbortController = controller;
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (this.userSettings.ollamaBaseUrl) headers['x-ollama-url'] = this.userSettings.ollamaBaseUrl;
+
+      const response = await fetch('/api/ai/analyze-image', {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          conversationId: conversation.id,
+          imageBase64,
+          mimeType,
+          prompt: prompt.trim(),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || `Image analysis failed (${response.status})`);
+      }
+      if (typeof data.content !== 'string' || !data.content.trim()) {
+        throw new Error('Qwen3-VL returned an empty image analysis.');
+      }
+
+      this.conversationManager.updateAssistantMessage(assistantMessage.id, data.content);
+      await this.conversationManager.loadConversationDetails(conversation.id);
+      return data.content;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Image analysis failed.';
+      const errorMessage = error instanceof DOMException && error.name === 'AbortError'
+        ? 'Image analysis was stopped.'
+        : message;
+      this.conversationManager.updateAssistantMessage(assistantMessage.id, errorMessage, true);
+      throw new Error(errorMessage);
+    } finally {
+      if (this.imageAbortController === controller) this.imageAbortController = null;
+    }
   }
 
   async init() {
@@ -228,6 +278,8 @@ export class AIService {
     return await res.json();
   }
   stopGeneration() {
+    this.imageAbortController?.abort();
+    this.imageAbortController = null;
     this.responseHandler.stopGeneration();
   }
 }

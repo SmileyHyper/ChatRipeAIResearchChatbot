@@ -46,7 +46,7 @@ export function ModelSelector({
   }, [isOpen]);
 
   const activeProviderStatus = providers[activeTab];
-  const activeTabModels = models.filter((m) => m.provider === activeTab);
+  const activeTabModels = models.filter((m) => m.provider === activeTab && m.id !== 'qwen3-vl:8b');
 
   const getStatusColor = (status?: ProviderStatus) => {
     if (!status) return 'bg-slate-400';
@@ -72,7 +72,7 @@ export function ModelSelector({
         <span className={`w-2 h-2 rounded-full transition-colors ${getStatusColor(currentProviderStatus)}`} />
         
         <span className="font-semibold text-[#082b5c]">
-          {currentProvider === 'ollama' ? 'Ollama' : currentProvider === 'gemini' ? 'Gemini' : 'Claude'}
+          {currentProvider === 'ollama' ? 'Ollama' : 'Claude'}
         </span>
         
         <span className="text-slate-400 font-light">/</span>
@@ -143,8 +143,8 @@ export function ModelSelector({
           </div>
 
           {/* Provider Selection Tabs */}
-          <div className="grid grid-cols-3 p-1.5 bg-slate-100 border-b border-slate-200 text-xs font-medium">
-            {(['ollama', 'gemini', 'claude'] as AIProviderId[]).map((pId) => {
+          <div className="grid grid-cols-2 p-1.5 bg-slate-100 border-b border-slate-200 text-xs font-medium">
+            {(['ollama', 'claude'] as AIProviderId[]).map((pId) => {
               const status = providers[pId];
               const isActive = activeTab === pId;
               const isSelectedProvider = currentProvider === pId;
@@ -162,7 +162,7 @@ export function ModelSelector({
                 >
                   <div className="flex items-center gap-1.5">
                     <span className={`w-2 h-2 rounded-full ${getStatusColor(status)}`} />
-                    <span>{pId === 'ollama' ? 'Ollama' : pId === 'gemini' ? 'Gemini' : 'Claude'}</span>
+                    <span>{pId === 'ollama' ? 'Ollama' : 'Claude'}</span>
                   </div>
                   <div className="flex items-center gap-1 mt-0.5">
                     <span className="text-[9px] text-slate-500 font-normal">
@@ -284,4 +284,3 @@ export function ModelSelector({
     </div>
   );
 }
-

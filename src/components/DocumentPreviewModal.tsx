@@ -20,6 +20,8 @@ export function DocumentPreviewModal({
 
   if (!isOpen || !document) return null;
 
+  const isPdf = document.file_format?.toLowerCase() === 'pdf';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col h-[85vh] text-slate-800">
@@ -105,41 +107,55 @@ export function DocumentPreviewModal({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+        <div
+          className={`flex-1 ${
+            activeTab === 'preview' && isPdf
+              ? 'min-h-0 overflow-hidden bg-slate-100'
+              : 'overflow-y-auto p-6 bg-slate-50/50'
+          }`}
+        >
           {activeTab === 'preview' && (
-            <div className="max-w-2xl mx-auto p-8 bg-white border border-slate-200 rounded-xl shadow-xs text-slate-800 leading-relaxed text-xs">
-              <h1 className="text-xl font-bold text-[#082b5c] mb-2">{document.title}</h1>
-              {document.authors && (
-                <p className="text-slate-600 font-medium mb-1">
-                  <strong>Authors:</strong> {document.authors} ({document.publication_year || 'N/A'})
-                </p>
-              )}
-              {document.research_category && (
-                <p className="text-[11px] text-slate-500 mb-4">
-                  <strong>Field:</strong> {document.research_category}
-                </p>
-              )}
+            isPdf ? (
+              <iframe
+                src={`/api/documents/${encodeURIComponent(document.id)}/file`}
+                title={`PDF preview: ${document.title}`}
+                className="block h-full min-h-[65vh] w-full border-0"
+              />
+            ) : (
+              <div className="max-w-2xl mx-auto p-8 bg-white border border-slate-200 rounded-xl shadow-xs text-slate-800 leading-relaxed text-xs">
+                <h1 className="text-xl font-bold text-[#082b5c] mb-2">{document.title}</h1>
+                {document.authors && (
+                  <p className="text-slate-600 font-medium mb-1">
+                    <strong>Authors:</strong> {document.authors} ({document.publication_year || 'N/A'})
+                  </p>
+                )}
+                {document.research_category && (
+                  <p className="text-[11px] text-slate-500 mb-4">
+                    <strong>Field:</strong> {document.research_category}
+                  </p>
+                )}
 
-              {document.abstract && (
-                <div className="my-4 p-4 rounded-lg bg-sky-50/60 border-l-4 border-[#69b7e6]">
-                  <strong className="block text-[#082b5c] text-[11px] uppercase tracking-wider mb-1">
-                    Abstract
-                  </strong>
-                  <p className="italic text-slate-700 leading-normal">{document.abstract}</p>
-                </div>
-              )}
+                {document.abstract && (
+                  <div className="my-4 p-4 rounded-lg bg-sky-50/60 border-l-4 border-[#69b7e6]">
+                    <strong className="block text-[#082b5c] text-[11px] uppercase tracking-wider mb-1">
+                      Abstract
+                    </strong>
+                    <p className="italic text-slate-700 leading-normal">{document.abstract}</p>
+                  </div>
+                )}
 
-              {document.html_content ? (
-                <div
-                  className="prose prose-sm max-w-none text-slate-800 space-y-3 mt-4"
-                  dangerouslySetInnerHTML={{ __html: document.html_content }}
-                />
-              ) : (
-                <pre className="whitespace-pre-wrap font-sans text-xs text-slate-700 leading-relaxed mt-4">
-                  {document.content || 'No text extracted yet.'}
-                </pre>
-              )}
-            </div>
+                {document.html_content ? (
+                  <div
+                    className="prose prose-sm max-w-none text-slate-800 space-y-3 mt-4"
+                    dangerouslySetInnerHTML={{ __html: document.html_content }}
+                  />
+                ) : (
+                  <pre className="whitespace-pre-wrap font-sans text-xs text-slate-700 leading-relaxed mt-4">
+                    {document.content || 'No text extracted yet.'}
+                  </pre>
+                )}
+              </div>
+            )
           )}
 
           {activeTab === 'metadata' && (
@@ -200,4 +216,3 @@ export function DocumentPreviewModal({
     </div>
   );
 }
-

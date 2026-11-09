@@ -344,7 +344,7 @@ export function ResearchLibrary({
                       <button
                         onClick={() => setPreviewDoc(doc)}
                         className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors"
-                        title="Preview extracted text and details"
+                        title="Preview document and details"
                       >
                         Preview
                       </button>
@@ -414,4 +414,3 @@ export function ResearchLibrary({
     </div>
   );
 }
-

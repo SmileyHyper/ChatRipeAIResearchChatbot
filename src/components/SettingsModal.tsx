@@ -19,7 +19,6 @@ export function SettingsModal({
   onRefreshHealth,
 }: SettingsModalProps) {
   const [settings, setSettings] = useState<UserProviderSettings>(initialSettings);
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showClaudeKey, setShowClaudeKey] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -102,8 +101,8 @@ export function SettingsModal({
                 {isTesting ? 'Testing...' : 'Test & Ping All'}
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              {(['ollama', 'gemini', 'claude'] as AIProviderId[]).map((pId) => {
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              {(['ollama', 'claude'] as AIProviderId[]).map((pId) => {
                 const status = providers[pId];
                 return (
                   <div key={pId} className="p-2 rounded-lg bg-white border border-slate-200/80 shadow-xs">
@@ -153,45 +152,7 @@ export function SettingsModal({
             </p>
           </div>
 
-          {/* Section 2: Google Gemini Settings */}
-          <div className="space-y-2 border-t border-slate-200 pt-4">
-            <div className="flex items-center justify-between">
-              <label htmlFor="geminiKey" className="font-bold text-[#082b5c] text-xs flex items-center gap-1.5">
-                <span className="px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 font-bold uppercase text-[9px]">Cloud</span>
-                Google Gemini API Key
-              </label>
-              <a
-                href="https://aistudio.google.com/app/apikey"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] text-[#0a58ca] hover:underline font-medium"
-              >
-                Get Gemini Key ↗
-              </a>
-            </div>
-            <div className="relative">
-              <input
-                id="geminiKey"
-                type={showGeminiKey ? 'text' : 'password'}
-                value={settings.geminiApiKey || ''}
-                onChange={(e) => setSettings({ ...settings, geminiApiKey: e.target.value })}
-                placeholder="AIzaSy... (or configure GEMINI_API_KEY in .env)"
-                className="w-full pl-3 pr-16 py-2 rounded-lg border border-slate-300 focus:border-[#69b7e6] focus:ring-1 focus:ring-[#69b7e6] font-mono text-xs bg-white text-slate-900"
-              />
-              <button
-                type="button"
-                onClick={() => setShowGeminiKey(!showGeminiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-0.5 text-[10px] text-slate-500 hover:text-slate-800 font-medium"
-              >
-                {showGeminiKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-500 leading-normal">
-              Your key is securely stored in your browser session and forwarded only to your local Vite server proxy. It is never logged or committed to git.
-            </p>
-          </div>
-
-          {/* Section 3: Anthropic Claude Settings */}
+          {/* Section 2: Anthropic Claude Settings */}
           <div className="space-y-2 border-t border-slate-200 pt-4">
             <div className="flex items-center justify-between">
               <label htmlFor="claudeKey" className="font-bold text-[#082b5c] text-xs flex items-center gap-1.5">
@@ -259,4 +220,3 @@ export function SettingsModal({
     </div>
   );
 }
-

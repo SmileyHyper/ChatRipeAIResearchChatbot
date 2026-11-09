@@ -112,12 +112,14 @@ export function ResearchEditor({ initialDocument, onBackToLibrary }: ResearchEdi
   const [wordCount, setWordCount] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
+  const [zoom, setZoom] = useState(100);
 
   // Editor Formatting States
   const [fontFamily, setFontFamily] = useState('Times New Roman');
   const [fontSize, setFontSize] = useState('3'); // 3 = 12pt in execCommand
   const [lineSpacing, setLineSpacing] = useState('1.5');
   const [marginSize, setMarginSize] = useState<'normal' | 'narrow' | 'moderate'>('normal');
+  const [activeTab, setActiveTab] = useState<'Home' | 'Insert' | 'Layout' | 'View'>('Home');
 
   // Modals & Drawers
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -605,18 +607,23 @@ const normalizeBlocks = () => {
   };
 
   const stackHeight = pageCount * PAGE_PERIOD - PAGE_GAP;
+  const pdfPreviewUrl =
+    initialDocument?.file_format?.toLowerCase() === 'pdf' && initialDocument.file_path
+      ? `/api/documents/${encodeURIComponent(initialDocument.id)}/file`
+      : undefined;
+  const isPdfPreview = Boolean(pdfPreviewUrl);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-100px)] min-h-[700px] bg-slate-100 rounded-2xl border border-slate-300 shadow-lg overflow-hidden animate-in fade-in duration-200">
-      {/* Top Application Bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 bg-[#082b5c] text-white border-b border-[#0f3b75]">
+    <div className="flex flex-col h-screen bg-slate-100 overflow-hidden animate-in fade-in duration-200">
+      {/* Top Application Bar - Slimmed to 56px */}
+      <div className="flex items-center justify-between px-4 h-14 bg-[#082b5c] text-white border-b border-[#0f3b75] shrink-0">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
             onClick={onBackToLibrary}
-            className="p-1.5 rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-2 rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors h-9 w-9 flex items-center justify-center"
             title="Back to Research Library"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="19" y1="12" x2="5" y2="12" />
               <polyline points="12 19 5 12 12 5" />
             </svg>
@@ -630,87 +637,69 @@ const normalizeBlocks = () => {
                 setTitle(e.target.value);
                 setSaveStatus('unsaved');
               }}
+              readOnly={isPdfPreview}
               placeholder="Paper Title..."
               className="bg-transparent font-bold text-sm text-white focus:bg-white/10 px-2 py-0.5 rounded outline-none border border-transparent focus:border-sky-400"
             />
-            <span className="text-[10px] text-sky-200 pl-2">
-              Microsoft Word-Style Research Editor • SLSU Format
+            <span className="text-[10px] text-sky-200/70 pl-2 leading-none">
+              {isPdfPreview ? 'PDF Preview • Read-only' : 'Microsoft Word-Style Research Editor • SLSU Format'}
             </span>
           </div>
-
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-            saveStatus === 'saved' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-400/20 text-amber-300'
-          }`}>
-            {saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'saving' ? 'Saving...' : 'Unsaved Changes'}
-          </span>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setTemplatesOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sky-100 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
-            <span>Templates</span>
-          </button>
+          {!isPdfPreview && (
+            <>
+              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
+                saveStatus === 'saved' ? 'text-emerald-400' : 'text-amber-400'
+              }`}>
+                {saveStatus === 'saved' ? 'SAVED ✓' : saveStatus === 'saving' ? 'SAVING...' : 'UNSAVED'}
+              </span>
 
-          <input
-            ref={importFileInputRef}
-            type="file"
-            accept=".docx"
-            onChange={handleImportDocx}
-            className="hidden"
-          />
-          <button
-            onClick={() => importFileInputRef.current?.click()}
-            className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-sky-100 text-xs font-semibold transition-colors"
-            title="Import an existing .docx file"
-          >
-            Import DOCX
-          </button>
+              <button
+                onClick={() => setTemplatesOpen(true)}
+                className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+                <span>Templates</span>
+              </button>
 
-          {docId && (
-            <a
-              href={`/api/documents/${docId}/download-docx`}
-              download
-              className="px-3 py-1.5 rounded-lg bg-[#69b7e6] hover:bg-[#8fd0f3] text-[#082b5c] text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs"
-              title="Download as valid Microsoft Word .docx"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              <span>Download DOCX</span>
-            </a>
+              <input ref={importFileInputRef} type="file" accept=".docx" onChange={handleImportDocx} className="hidden" />
+              <button
+                onClick={() => importFileInputRef.current?.click()}
+                className="h-9 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors border border-white/10"
+              >
+                Import DOCX
+              </button>
+
+              <button
+                onClick={handleSaveDocument}
+                className="h-9 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all"
+              >
+                Save
+              </button>
+
+              <button
+                onClick={handleOpenVersions}
+                className="h-9 w-9 flex items-center justify-center rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors border border-white/10"
+                title="Version history"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <path d="M3 3v5h5M12 7v5l3 2" />
+                </svg>
+              </button>
+            </>
           )}
 
           <button
-            onClick={handleSaveDocument}
-            className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-sm transition-all"
-          >
-            Save
-          </button>
-
-          <button
-            onClick={handleOpenVersions}
-            className="p-1.5 rounded-lg text-sky-200 hover:text-white hover:bg-white/10 transition-colors"
-            title="Document version history"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
-              <path d="M3 3v5h5M12 7v5l3 2" />
-            </svg>
-          </button>
-
-          <button
             onClick={() => setAiAssistantOpen(!aiAssistantOpen)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors ${
-              aiAssistantOpen ? 'bg-sky-400 text-[#082b5c]' : 'bg-white/10 text-white hover:bg-white/20'
+            className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors border ${
+              aiAssistantOpen ? 'bg-sky-400 text-[#082b5c] border-sky-400' : 'bg-white/10 text-white hover:bg-white/20 border-white/10'
             }`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -722,273 +711,355 @@ const normalizeBlocks = () => {
       </div>
 
       {/* Word-Style Ribbon / Formatting Toolbar */}
-      <div className="flex items-center gap-1 px-4 py-2 bg-slate-200 border-b border-slate-300 text-slate-700 text-xs flex-wrap">
-        {/* Undo / Redo */}
-        <button onClick={() => executeCommand('undo')} className="p-1.5 rounded hover:bg-slate-300" title="Undo (Ctrl+Z)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6M3 13a9 9 0 0 1 15-6.7L21 9" /></svg>
-        </button>
-        <button onClick={() => executeCommand('redo')} className="p-1.5 rounded hover:bg-slate-300" title="Redo (Ctrl+Y)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6M21 13a9 9 0 0 0-15-6.7L3 9" /></svg>
-        </button>
+      {isPdfPreview ? (
+        <div className="px-4 py-2 bg-slate-200 border-b border-slate-300 text-xs text-slate-600">
+          Viewing the original PDF. PDF files are read-only in the paper editor.
+        </div>
+      ) : (
+        <div className="bg-slate-50 border-b border-slate-300">
+          <div className="flex border-b border-slate-200 px-2">
+            {(['Home', 'Insert', 'Layout', 'View'] as const).map((tab) => (
+              <div
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`word-ribbon-tab ${activeTab === tab ? 'active' : ''}`}
+              >
+                {tab}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-start bg-white h-20 px-2 py-1.5 overflow-x-auto gap-2">
+            {activeTab === 'Home' && (
+              <>
+                <div className="word-ribbon-group">
+                  <div className="flex gap-1">
+                    <button onClick={() => executeCommand('undo')} className="word-tool-button" title="Undo">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6M3 13a9 9 0 0 1 15-6.7L21 9" /></svg>
+                      <span className="text-[9px]">Undo</span>
+                    </button>
+                    <button onClick={() => executeCommand('redo')} className="word-tool-button" title="Redo">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6M21 13a9 9 0 0 0-15-6.7L3 9" /></svg>
+                      <span className="text-[9px]">Redo</span>
+                    </button>
+                  </div>
+                  <span className="word-ribbon-group-label">Clipboard</span>
+                </div>
+                <div className="w-px bg-slate-200 h-16 my-auto" />
+                <div className="word-ribbon-group">
+                  <div className="flex gap-1 mb-1">
+                    <select value={fontFamily} onChange={(e) => { setFontFamily(e.target.value); executeCommand('fontName', e.target.value); }} className="px-1 text-xs border border-slate-300 rounded">
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Calibri">Calibri</option>
+                      <option value="Montserrat">Montserrat</option>
+                    </select>
+                    <select value={fontSize} onChange={(e) => { setFontSize(e.target.value); executeCommand('fontSize', e.target.value); }} className="px-1 text-xs border border-slate-300 rounded w-14">
+                      <option value="1">10 pt</option>
+                      <option value="2">11 pt</option>
+                      <option value="3">12 pt</option>
+                      <option value="4">14 pt</option>
+                      <option value="5">18 pt</option>
+                      <option value="6">24 pt</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-0.5">
+                    <button onClick={() => executeCommand('bold')} className="word-tool-button font-bold" title="Bold">B</button>
+                    <button onClick={() => executeCommand('italic')} className="word-tool-button italic" title="Italic">I</button>
+                    <button onClick={() => executeCommand('underline')} className="word-tool-button underline" title="Underline">U</button>
+                    <button onClick={() => executeCommand('strikeThrough')} className="word-tool-button line-through" title="Strikethrough">S</button>
+                    <div className="flex items-center gap-1 ml-1 pl-1 border-l border-slate-200">
+                      <label className="text-[10px] text-slate-500" title="Text Color">A</label>
+                      <input type="color" onChange={(e) => executeCommand('foreColor', e.target.value)} className="w-4 h-4 cursor-pointer bg-transparent border-0" title="Font Color" />
+                      <label className="text-[10px] text-slate-500 ml-1" title="Highlight">H</label>
+                      <input type="color" defaultValue="#ffff00" onChange={(e) => executeCommand('hiliteColor', e.target.value)} className="w-4 h-4 cursor-pointer bg-transparent border-0" title="Text Highlight Color" />
+                    </div>
+                  </div>
+                  <span className="word-ribbon-group-label">Font</span>
+                </div>
+                <div className="w-px bg-slate-200 h-16 my-auto" />
+                <div className="word-ribbon-group">
+                  <div className="flex gap-0.5 mb-1">
+                    <button onClick={() => executeCommand('justifyLeft')} className="word-tool-button" title="Align Left">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="17" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="17" y1="18" x2="3" y2="18" /></svg>
+                    </button>
+                    <button onClick={() => executeCommand('justifyCenter')} className="word-tool-button" title="Align Center">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="10" x2="6" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="18" y1="18" x2="6" y2="18" /></svg>
+                    </button>
+                    <button onClick={() => executeCommand('justifyRight')} className="word-tool-button" title="Align Right">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="10" x2="7" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="7" y2="18" /></svg>
+                    </button>
+                    <button onClick={() => executeCommand('justifyFull')} className="word-tool-button" title="Justify">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="3" y2="18" /></svg>
+                    </button>
+                  </div>
+                  <div className="flex gap-0.5">
+                    <button onClick={() => executeCommand('insertUnorderedList')} className="word-tool-button" title="Bullet List">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
+                    </button>
+                    <button onClick={() => executeCommand('insertOrderedList')} className="word-tool-button" title="Numbered List">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="10" y1="6" x2="21" y2="6" /><line x1="10" y1="12" x2="21" y2="12" /><line x1="10" y1="18" x2="21" y2="18" /><path d="M4 6h1v4" /><path d="M4 10h2" /></svg>
+                    </button>
+                    <select
+                      value={lineSpacing}
+                      onChange={(e) => setLineSpacing(e.target.value)}
+                      className="px-1 text-xs border border-slate-300 rounded ml-1"
+                      title="Line Spacing"
+                    >
+                      <option value="1.0">1.0</option>
+                      <option value="1.15">1.15</option>
+                      <option value="1.5">1.5</option>
+                      <option value="2.0">2.0</option>
+                    </select>
+                  </div>
+                  <span className="word-ribbon-group-label">Paragraph</span>
+                </div>
+                <div className="w-px bg-slate-200 h-16 my-auto" />
+                <div className="word-ribbon-group">
+                  <div className="flex gap-1 items-center">
+                    <button onClick={() => executeCommand('formatBlock', '<h1>')} className="px-2 py-1 border border-slate-200 rounded text-xs font-bold hover:bg-slate-100" title="Heading 1">H1 Heading</button>
+                    <button onClick={() => executeCommand('formatBlock', '<h2>')} className="px-2 py-1 border border-slate-200 rounded text-xs font-semibold hover:bg-slate-100" title="Heading 2">H2 Sub</button>
+                    <button onClick={() => executeCommand('formatBlock', '<p>')} className="px-2 py-1 border border-slate-200 rounded text-xs hover:bg-slate-100" title="Normal">Normal</button>
+                    <button onClick={() => executeCommand('removeFormat')} className="px-2 py-1 border border-slate-200 rounded text-xs hover:bg-slate-100 text-rose-600 font-bold" title="Clear Formatting">Clear</button>
+                  </div>
+                  <span className="word-ribbon-group-label">Styles Gallery</span>
+                </div>
+              </>
+            )}
+            {activeTab === 'Insert' && (
+              <>
+                <div className="word-ribbon-group">
+                  <button onClick={handleInsertTable} className="word-tool-button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /><path d="M15 3v18" /></svg>
+                    <span className="text-[9px]">Table</span>
+                  </button>
+                  <span className="word-ribbon-group-label">Tables</span>
+                </div>
+                <div className="word-ribbon-group">
+                  <button onClick={() => {
+                    const url = prompt('Enter image URL:');
+                    if (url) executeCommand('insertImage', url);
+                  }} className="word-tool-button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                    <span className="text-[9px]">Picture</span>
+                  </button>
+                  <span className="word-ribbon-group-label">Illustrations</span>
+                </div>
+              </>
+            )}
+            {activeTab === 'Layout' && (
+              <>
+                <div className="word-ribbon-group">
+                  <select
+                    value={marginSize}
+                    onChange={(e) => setMarginSize(e.target.value as any)}
+                    className="px-1 text-xs border border-slate-300 rounded mb-1"
+                  >
+                    <option value="normal">Normal (1")</option>
+                    <option value="moderate">Moderate (0.75")</option>
+                    <option value="narrow">Narrow (0.5")</option>
+                  </select>
+                  <span className="word-ribbon-group-label">Page Setup</span>
+                </div>
+              </>
+            )}
+            {activeTab === 'View' && (
+              <>
+                <div className="word-ribbon-group">
+                  <div className="flex gap-1">
+                    <button className="word-tool-button active">
+                      <span className="text-[9px]">Print Layout</span>
+                    </button>
+                  </div>
+                  <span className="word-ribbon-group-label">Views</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
 
-        <span className="w-px h-5 bg-slate-300 mx-1" />
 
-        {/* Font Family Selector */}
-        <select
-          value={fontFamily}
-          onChange={(e) => {
-            setFontFamily(e.target.value);
-            executeCommand('fontName', e.target.value);
-          }}
-          className="px-2 py-1 rounded bg-white border border-slate-300 text-xs font-medium"
-        >
-          <option value="Times New Roman">Times New Roman (APA)</option>
-          <option value="Arial">Arial</option>
-          <option value="Georgia">Georgia</option>
-          <option value="Calibri">Calibri</option>
-          <option value="Montserrat">Montserrat</option>
-        </select>
-
-        {/* Font Size Selector */}
-        <select
-          value={fontSize}
-          onChange={(e) => {
-            setFontSize(e.target.value);
-            executeCommand('fontSize', e.target.value);
-          }}
-          className="px-2 py-1 rounded bg-white border border-slate-300 text-xs font-medium w-16"
-        >
-          <option value="1">10 pt</option>
-          <option value="2">11 pt</option>
-          <option value="3">12 pt</option>
-          <option value="4">14 pt</option>
-          <option value="5">18 pt</option>
-          <option value="6">24 pt</option>
-        </select>
-
-        {/* Line Spacing */}
-        <select
-          value={lineSpacing}
-          onChange={(e) => setLineSpacing(e.target.value)}
-          className="px-2 py-1 rounded bg-white border border-slate-300 text-xs font-medium"
-          title="Line spacing"
-        >
-          <option value="1.15">1.15</option>
-          <option value="1.5">1.5</option>
-          <option value="2.0">Double</option>
-        </select>
-
-        <span className="w-px h-5 bg-slate-300 mx-1" />
-
-        {/* Styles: Bold, Italic, Underline, Strike */}
-        <button onClick={() => executeCommand('bold')} className="p-1.5 rounded hover:bg-slate-300 font-bold" title="Bold (Ctrl+B)">B</button>
-        <button onClick={() => executeCommand('italic')} className="p-1.5 rounded hover:bg-slate-300 italic" title="Italic (Ctrl+I)">I</button>
-        <button onClick={() => executeCommand('underline')} className="p-1.5 rounded hover:bg-slate-300 underline" title="Underline (Ctrl+U)">U</button>
-        <button onClick={() => executeCommand('strikeThrough')} className="p-1.5 rounded hover:bg-slate-300 line-through" title="Strikethrough">S</button>
-
-        <span className="w-px h-5 bg-slate-300 mx-1" />
-
-        {/* Headings */}
-        <button onClick={() => executeCommand('formatBlock', '<h1>')} className="px-2 py-1 rounded hover:bg-slate-300 font-bold" title="Heading 1">H1</button>
-        <button onClick={() => executeCommand('formatBlock', '<h2>')} className="px-2 py-1 rounded hover:bg-slate-300 font-bold" title="Heading 2">H2</button>
-        <button onClick={() => executeCommand('formatBlock', '<h3>')} className="px-2 py-1 rounded hover:bg-slate-300 font-bold" title="Heading 3">H3</button>
-        <button onClick={() => executeCommand('formatBlock', '<p>')} className="px-2 py-1 rounded hover:bg-slate-300 text-[11px]" title="Normal Paragraph">¶</button>
-
-        <span className="w-px h-5 bg-slate-300 mx-1" />
-
-        {/* Alignments */}
-        <button onClick={() => executeCommand('justifyLeft')} className="p-1.5 rounded hover:bg-slate-300" title="Align Left">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="17" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="17" y1="18" x2="3" y2="18" /></svg>
-        </button>
-        <button onClick={() => executeCommand('justifyCenter')} className="p-1.5 rounded hover:bg-slate-300" title="Align Center">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="10" x2="6" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="18" y1="18" x2="6" y2="18" /></svg>
-        </button>
-        <button onClick={() => executeCommand('justifyRight')} className="p-1.5 rounded hover:bg-slate-300" title="Align Right">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="10" x2="7" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="7" y2="18" /></svg>
-        </button>
-        <button onClick={() => executeCommand('justifyFull')} className="p-1.5 rounded hover:bg-slate-300" title="Justify">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="21" y1="10" x2="3" y2="10" /><line x1="21" y1="6" x2="3" y2="6" /><line x1="21" y1="14" x2="3" y2="14" /><line x1="21" y1="18" x2="3" y2="18" /></svg>
-        </button>
-
-        <span className="w-px h-5 bg-slate-300 mx-1" />
-
-        {/* Lists & Table */}
-        <button onClick={() => executeCommand('insertUnorderedList')} className="p-1.5 rounded hover:bg-slate-300" title="Bulleted List">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
-        </button>
-        <button onClick={() => executeCommand('insertOrderedList')} className="p-1.5 rounded hover:bg-slate-300" title="Numbered List">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="10" y1="6" x2="21" y2="6" /><line x1="10" y1="12" x2="21" y2="12" /><line x1="10" y1="18" x2="21" y2="18" /><path d="M4 6h1v4" /><path d="M4 10h2" /><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" /></svg>
-        </button>
-        <button onClick={handleInsertTable} className="px-2 py-1 rounded hover:bg-slate-300 text-xs font-semibold flex items-center gap-1" title="Insert Academic Table">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /><path d="M3 15h18" /><path d="M9 3v18" /><path d="M15 3v18" /></svg>
-          <span>Table</span>
-        </button>
-
-        {/* Margins */}
-        <select
-          value={marginSize}
-          onChange={(e) => setMarginSize(e.target.value as any)}
-          className="px-2 py-1 rounded bg-white border border-slate-300 text-xs font-medium ml-auto"
-        >
-          <option value="normal">Normal (1" Margins)</option>
-          <option value="moderate">Moderate (0.75")</option>
-          <option value="narrow">Narrow (0.5")</option>
-        </select>
-      </div>
+      )}
 
       {/* Editor Body: Canvas on Left + AI Assistant on Right */}
       <div className="flex-1 flex overflow-hidden">
         {/* Main Writing Canvas: stack of Letter-size pages */}
-        <div className="flex-1 overflow-auto px-8 pt-8 pb-16 bg-slate-300/60">
-          <div
-            className="relative mx-auto shrink-0"
-            style={{ width: PAGE_W, height: stackHeight }}
-            onMouseDown={(e) => {
-              if (editorRef.current && !editorRef.current.contains(e.target as Node)) {
-                e.preventDefault();
-                editorRef.current.focus();
-              }
-            }}
-          >
-            {/* Page sheets */}
-            {Array.from({ length: pageCount }).map((_, i) => (
-              <div
-                key={i}
-                className="absolute bg-white shadow-2xl border border-slate-300 rounded-sm select-none pointer-events-none"
-                style={{ left: 0, top: i * PAGE_PERIOD, width: PAGE_W, height: PAGE_H }}
-              >
-                <div
-                  className="absolute text-right text-[11px] text-slate-400 font-mono border-b border-slate-100 pb-1"
-                  style={{ left: margin, right: margin, top: Math.max(12, margin / 2 - 14) }}
-                >
-                  • Page {i + 1}
+        <div className="flex-1 overflow-auto bg-slate-100 p-8 flex justify-center">
+          <div className="flex flex-col" style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top center' }}>
+            <div className="ruler-horizontal w-[816px] mb-4">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="flex-1 relative">
+                  <div className="ruler-tick ruler-tick-major" />
+                  <span className="ruler-number">{i * 100}</span>
                 </div>
-                <div
-                  className="absolute text-center text-[10px] text-slate-400 font-mono border-t border-slate-100 pt-1"
-                  style={{ left: margin, right: margin, bottom: Math.max(12, margin / 2 - 14) }}
-                >
-                  Southern Leyte State University — Center for Research &amp; Innovation
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
 
-            {/* Editable flow, laid over the sheets */}
-            <div
-              ref={editorRef}
-              contentEditable
-              suppressContentEditableWarning
-              onInput={() => {
-                setSaveStatus('unsaved');
-                updateCounts();
-                updateCurrentPage();
-              }}
-              onMouseUp={handleSelectionChange}
-              onKeyUp={handleSelectionChange}
-              className="outline-none focus:outline-none select-text prose max-w-none text-slate-900"
-              style={{
-                position: 'absolute',
-                top: margin,
-                left: margin,
-                width: PAGE_W - 2 * margin,
-                minHeight: stackHeight - 2 * margin,
-                fontSize: '16px',
-                textAlign: 'justify',
-                fontFamily: fontFamily === 'Times New Roman' ? '"Times New Roman", Times, serif' : fontFamily,
-                lineHeight: lineSpacing === '2.0' ? '2.0' : lineSpacing === '1.5' ? '1.5' : '1.15',
-              }}
-            />
+            {isPdfPreview ? (
+              <div className="relative h-[1056px] w-[816px] bg-white shadow-2xl page-shadow">
+                <iframe
+                  src={pdfPreviewUrl}
+                  title={`PDF preview: ${title}`}
+                  className="absolute inset-0 h-full w-full border-0"
+                />
+              </div>
+            ) : (
+              <div
+                className="relative shrink-0"
+                style={{ width: PAGE_W, height: stackHeight }}
+                onMouseDown={(e) => {
+                  if (editorRef.current && !editorRef.current.contains(e.target as Node)) {
+                    e.preventDefault();
+                    editorRef.current.focus();
+                  }
+                }}
+              >
+                {/* Page sheets */}
+                {Array.from({ length: pageCount }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute bg-white shadow-2xl border border-slate-300 rounded-sm select-none pointer-events-none page-shadow"
+                    style={{ left: 0, top: i * PAGE_PERIOD, width: PAGE_W, height: PAGE_H }}
+                  >
+                    <div
+                      className="absolute text-center text-[10px] text-slate-400 font-mono border-t border-slate-100 pt-1"
+                      style={{ left: margin, right: margin, bottom: Math.max(12, margin / 2 - 14) }}
+                    >
+                      Southern Leyte State University — Center for Research &amp; Innovation
+                    </div>
+                  </div>
+                ))}
+
+                {/* Editable flow, laid over the sheets */}
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={() => {
+                    setSaveStatus('unsaved');
+                    updateCounts();
+                    updateCurrentPage();
+                  }}
+                  onMouseUp={handleSelectionChange}
+                  onKeyUp={handleSelectionChange}
+                  className="outline-none focus:outline-none select-text prose max-w-none text-slate-900"
+                  style={{
+                    position: 'absolute',
+                    top: margin,
+                    left: margin,
+                    width: PAGE_W - 2 * margin,
+                    minHeight: stackHeight - 2 * margin,
+                    fontSize: '16px',
+                    textAlign: 'justify',
+                    fontFamily: fontFamily === 'Times New Roman' ? '"Times New Roman", Times, serif' : fontFamily,
+                    lineHeight: lineSpacing === '2.0' ? '2.0' : lineSpacing === '1.5' ? '1.5' : '1.15',
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* AI Research Writing Assistant Panel (chat to prompt) */}
+        {/* AI Research Writing Assistant Panel (IDE Style) */}
         {aiAssistantOpen && (
-          <div className="w-[360px] bg-white border-l border-slate-300 flex flex-col h-full shadow-lg z-10 animate-in slide-in-from-right-4 duration-200">
-            <div className="flex items-center justify-between px-4 py-3 bg-[#082b5c] text-white">
+          <div className="w-[380px] ide-sidebar border-l border-[#333333] flex flex-col h-full shadow-2xl z-10 animate-in slide-in-from-right-4 duration-200">
+            <div className="ide-header">
               <div className="flex items-center gap-2">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8fd0f3" strokeWidth="2.2">
-                  <path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8z" />
-                </svg>
-                <h3 className="font-bold text-xs">AI Writing Assistant</h3>
+                <span className="text-[#007acc] font-mono font-bold text-xs">⚡ AI COPILOT</span>
+                <span className="text-[10px] bg-[#3c3c3c] text-[#cccccc] px-1.5 py-0.5 rounded font-mono">v1.0</span>
               </div>
-              <select
-                value={aiProvider}
-                onChange={(e) => setAiProvider(e.target.value as AIProviderId)}
-                className="px-2 py-0.5 rounded bg-white/20 text-white font-mono text-[10px] border border-white/20 outline-none"
-              >
-                <option value="ollama" className="text-slate-800">Ollama (Local)</option>
-                <option value="gemini" className="text-slate-800">Gemini (Cloud)</option>
-                <option value="claude" className="text-slate-800">Claude (Cloud)</option>
-              </select>
+              <div className="flex items-center gap-2">
+                <select
+                  value={aiProvider}
+                  onChange={(e) => setAiProvider(e.target.value as AIProviderId)}
+                  className="bg-[#3c3c3c] text-[#cccccc] font-mono text-[10px] border border-[#555555] rounded px-1 py-0.5 outline-none"
+                >
+                  <option value="ollama">Ollama (Local)</option>
+                  <option value="claude">Claude (Cloud)</option>
+                </select>
+                <button
+                  onClick={() => setAiAssistantOpen(false)}
+                  className="text-[#969696] hover:text-white text-xs px-1"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0 text-xs text-slate-700">
-              {/* Target text */}
-              <div className="m-3 mb-0 p-2.5 rounded-lg bg-slate-50 border border-slate-200 shrink-0">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-[10px] text-slate-500 uppercase">
-                    {selectedText ? 'Targeting selection' : 'Targeting whole document'}
-                  </span>
-                  {selectedText && (
-                    <button
-                      onClick={() => {
-                        setSelectedText('');
-                        savedRange.current = null;
-                      }}
-                      className="text-[10px] text-slate-400 hover:text-rose-600"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-800 italic line-clamp-2">
-                  {selectedText ? `"${selectedText}"` : 'Highlight text in your paper to target it.'}
-                </p>
+            <div className="flex-1 flex flex-col min-h-0 text-xs font-mono">
+              {/* Active Context / Scope Info */}
+              <div className="ide-section-header">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>CONTEXT: {selectedText ? 'SELECTION' : 'FULL FILE'}</span>
               </div>
 
-              {/* Chat thread */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="p-2 bg-[#1e1e1e] border-b border-[#2d2d2d] text-[11px]">
+                <div className="text-[#6a9955] truncate">
+                  // {title} ({category})
+                </div>
+                {selectedText && (
+                  <div className="mt-1 p-1.5 bg-[#252526] rounded border border-[#3c3c3c] text-[#ce9178] max-h-16 overflow-y-auto">
+                    "{selectedText}"
+                  </div>
+                )}
+              </div>
+
+              {/* Console / Chat Log */}
+              <div className="ide-section-header">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                <span>TERMINAL OUTPUT</span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-3 space-y-3 font-sans">
                 {chat.length === 0 && (
-                  <div className="text-center text-slate-400 py-8 space-y-1">
-                    <p className="font-semibold text-slate-500">Tell the assistant what to do</p>
-                    <p className="text-[11px]">
-                      e.g. "Rewrite this in a more formal tone", "Draft objectives from my title", "Make this paragraph shorter"
-                    </p>
+                  <div className="text-center text-[#6e7681] py-8 space-y-2 font-mono text-[11px]">
+                    <p className="text-[#569cd6]">&gt; Copilot initialized.</p>
+                    <p>Ready to assist with scholarly drafting, formatting, and humanization.</p>
+                    <div className="mt-4 pt-4 border-t border-[#2d2d2d] text-left text-[10px] text-[#8b949e]">
+                      <p className="font-bold text-[#c9d1d9] mb-1">PROMPT SUGGESTIONS:</p>
+                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Refine tone for academic publication')}>• Refine tone for academic publication</p>
+                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Summarize key methodology points')}>• Summarize key methodology points</p>
+                      <p className="cursor-pointer hover:text-[#569cd6]" onClick={() => setChatInput('Check for passive voice overuse')}>• Check for passive voice overuse</p>
+                    </div>
                   </div>
                 )}
 
                 {chat.map((m, i) => (
-                  <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                  <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[9px] font-mono text-[#6e7681] mb-1">
+                      {m.role === 'user' ? 'USER@EDITOR' : 'COPILOT@AI'}
+                    </span>
                     <div
-                      className={`max-w-[92%] rounded-xl px-3 py-2 leading-relaxed whitespace-pre-wrap ${
+                      className={`ide-chat-bubble ${
                         m.role === 'user'
-                          ? 'bg-[#082b5c] text-white'
+                          ? 'ide-chat-bubble-user'
                           : m.error
-                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                          : 'bg-slate-100 text-slate-800 border border-slate-200'
+                          ? 'bg-[#5a1d1d] border border-[#be1111] text-[#f87171]'
+                          : 'ide-chat-bubble-ai'
                       }`}
                     >
-                      {m.error ? `⚠️ ${m.content}` : m.content}
+                      {m.error ? `[ERROR] ${m.content}` : m.content}
                       {m.role === 'assistant' && !m.error && (
-                        <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200">
+                        <div className="flex items-center gap-2 mt-3 pt-2 border-t border-[#454545]">
                           <button
                             onClick={() => applyText(m.content, 'replace')}
-                            className="px-2 py-1 rounded bg-[#082f66] hover:bg-[#0d4b91] text-white font-bold text-[11px]"
+                            className="px-2 py-0.5 rounded bg-[#0e639c] hover:bg-[#1177bb] text-white font-mono text-[10px] font-bold"
                           >
-                            {selectedText ? 'Replace selected' : 'Insert'}
+                            {selectedText ? 'ACCEPT (Replace)' : 'INSERT AT CURSOR'}
                           </button>
                           {selectedText && (
                             <button
                               onClick={() => applyText(m.content, 'below')}
-                              className="px-2 py-1 rounded border border-slate-300 hover:bg-white font-semibold text-[11px]"
+                              className="px-2 py-0.5 rounded bg-[#3c3c3c] hover:bg-[#4c4c4c] text-[#cccccc] font-mono text-[10px]"
                             >
-                              Insert below
+                              INSERT BELOW
                             </button>
                           )}
                           <button
                             onClick={() => navigator.clipboard.writeText(m.content)}
-                            className="px-2 py-1 rounded border border-slate-300 hover:bg-white font-semibold text-[11px]"
+                            className="px-2 py-0.5 rounded bg-[#3c3c3c] hover:bg-[#4c4c4c] text-[#cccccc] font-mono text-[10px]"
                           >
-                            Copy
+                            COPY
                           </button>
                         </div>
                       )}
@@ -997,50 +1068,34 @@ const normalizeBlocks = () => {
                 ))}
 
                 {isAiGenerating && (
-                  <div className="flex justify-start">
-                    <div className="px-3 py-2 rounded-xl bg-sky-50 border border-sky-200 text-[11px] text-[#082b5c] animate-pulse">
-                      {humanize ? 'Drafting and humanizing…' : 'Thinking…'}
-                    </div>
+                  <div className="flex items-center gap-2 text-[#569cd6] font-mono text-[11px] animate-pulse">
+                    <span className="inline-block w-2 h-2 rounded-full bg-[#569cd6]"></span>
+                    {humanize ? 'Humanizing scholarly text...' : 'Generating code/text...'}
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Composer */}
-              <div className="p-3 border-t border-slate-200 bg-white shrink-0 space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={humanize}
-                      onClick={() => setHumanize(!humanize)}
-                      className={`w-8 h-4 rounded-full relative transition-colors ${humanize ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${humanize ? 'left-4' : 'left-0.5'}`}
-                      />
-                    </button>
-                    <span className="font-semibold text-[11px] text-slate-700">Humanize output</span>
+              {/* IDE Input Controls */}
+              <div className="ide-input-container space-y-2">
+                <div className="flex items-center justify-between text-[10px] text-[#969696]">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={humanize}
+                      onChange={(e) => setHumanize(e.target.checked)}
+                      className="rounded bg-[#3c3c3c] border-[#555555] accent-[#007acc]"
+                    />
+                    <span>Humanize AI Drafts</span>
                   </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleSendChat('Rewrite this so it reads naturally, like a human researcher wrote it.')}
-                      disabled={isAiGenerating}
-                      className="text-[11px] font-semibold text-sky-700 hover:underline disabled:opacity-50"
-                      title="Humanize the selected text (or whole document)"
-                    >
-                      Humanize now
+                  {chat.length > 0 && (
+                    <button onClick={() => setChat([])} className="hover:text-rose-400">
+                      Clear Output
                     </button>
-                    {chat.length > 0 && (
-                      <button onClick={() => setChat([])} className="text-[11px] text-slate-400 hover:text-rose-600">
-                        Clear chat
-                      </button>
-                    )}
-                  </div>
+                  )}
                 </div>
 
-                <div className="flex items-end gap-2">
+                <div className="flex gap-2">
                   <textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
@@ -1051,32 +1106,51 @@ const normalizeBlocks = () => {
                       }
                     }}
                     rows={2}
-                    placeholder="Ask the assistant… (Enter to send, Shift+Enter for new line)"
-                    className="flex-1 resize-none rounded-lg border border-slate-300 focus:border-[#69b7e6] outline-none px-2.5 py-2 text-xs"
+                    placeholder="Enter prompt or command (e.g. /humanize)..."
+                    className="ide-input font-mono text-xs resize-none"
                   />
                   <button
                     onClick={() => handleSendChat()}
                     disabled={isAiGenerating || !chatInput.trim()}
-                    className="px-3 py-2 rounded-lg bg-[#082f66] hover:bg-[#0d4b91] disabled:opacity-50 text-white font-bold text-xs"
+                    className="px-3 bg-[#0e639c] hover:bg-[#1177bb] disabled:opacity-40 text-white rounded font-bold font-mono text-xs flex items-center justify-center"
                   >
-                    Send
+                    ▶
                   </button>
                 </div>
               </div>
             </div>
           </div>
         )}
+
       </div>
 
       {/* Editor Status Bar */}
-      <div className="flex items-center justify-between px-6 py-2 bg-slate-200 border-t border-slate-300 text-[11px] text-slate-600">
+      <div className="flex items-center justify-between px-6 h-8 bg-slate-200 border-t border-slate-300 text-[11px] text-slate-600 shrink-0">
         <div className="flex items-center gap-4">
-          <span>Page <strong>{Math.min(currentPage, pageCount)}</strong> of <strong>{pageCount}</strong></span>
-          <span>Words: <strong>{wordCount}</strong></span>
-          <span>Characters: <strong>{(editorRef.current?.innerText || '').length}</strong></span>
-          <span>Standard Font: <strong>{fontFamily}</strong></span>
+          {isPdfPreview ? (
+            <span>Original PDF preview</span>
+          ) : (
+            <>
+              <span>Page <strong>{Math.min(currentPage, pageCount)}</strong> of <strong>{pageCount}</strong></span>
+              <span>Words: <strong>{wordCount}</strong></span>
+              <span>Characters: <strong>{(editorRef.current?.innerText || '').length}</strong></span>
+              <span>Standard Font: <strong>{fontFamily}</strong></span>
+            </>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px]">Zoom: {zoom}%</span>
+            <input
+              type="range"
+              min={50}
+              max={200}
+              step={10}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              className="w-24 accent-[#082b5c] cursor-pointer"
+            />
+          </div>
           <span>Document ID: <strong className="font-mono">{docId || 'Draft'}</strong></span>
         </div>
       </div>

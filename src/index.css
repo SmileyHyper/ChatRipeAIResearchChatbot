@@ -38,22 +38,93 @@
 
 .app-shell {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width, 264px) minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns 0.3s ease;
 }
 
 .sidebar {
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 30;
-  width: 264px;
+  width: var(--sidebar-width, 264px);
   display: flex;
   flex-direction: column;
   padding: 26px 18px 20px;
   color: #f7fbff;
   background: var(--navy);
   border-right: 1px solid rgb(255 255 255 / 8%);
+  transition: width 0.3s ease;
+  overflow-x: hidden;
 }
+
+.sidebar.collapsed {
+  width: 72px;
+}
+
+.sidebar.collapsed .brand-name,
+.sidebar.collapsed .brand-tag,
+.sidebar.collapsed .new-chat span,
+.sidebar.collapsed .new-chat-text,
+.sidebar.collapsed .primary-nav button span,
+.sidebar.collapsed .primary-nav button .nav-label,
+.sidebar.collapsed .recent-chats-section,
+.sidebar.collapsed .sidebar-footer button .footer-label,
+.sidebar.collapsed .profile-details {
+  display: none;
+}
+
+.sidebar.collapsed .brand-row {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar.collapsed .new-chat {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  margin: 0 auto;
+}
+
+.sidebar.collapsed .primary-nav button {
+  justify-content: center;
+  padding: 10px;
+}
+
+.sidebar.collapsed .profile {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.sidebar-toggle-desktop {
+  position: absolute;
+  top: 18px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  background: var(--sky);
+  color: var(--navy);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 40;
+  border: 2px solid var(--navy);
+  transition: transform 0.2s ease;
+}
+
+.sidebar-toggle-desktop:hover {
+  transform: scale(1.1);
+}
+
+.sidebar.collapsed .sidebar-toggle-desktop {
+  right: 12px;
+  top: 75px;
+}
+
+
 
 .brand-row {
   position: relative;
@@ -644,11 +715,80 @@ footer span {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-  }
+/* Word-like Editor Styles */
+.word-ribbon-tab {
+  @apply px-4 py-2 text-xs font-semibold cursor-pointer border-b-2 border-transparent transition-all;
 }
+.word-ribbon-tab.active {
+  @apply border-[#082b5c] text-[#082b5c] bg-white/50;
+}
+.word-ribbon-group {
+  @apply flex flex-col items-center px-3 border-r border-slate-300 last:border-0;
+}
+.word-ribbon-group-label {
+  @apply mt-auto text-[9px] text-slate-500 uppercase font-bold tracking-tighter pt-1;
+}
+.word-tool-button {
+  @apply p-1.5 rounded hover:bg-slate-300 transition-colors flex flex-col items-center gap-0.5 min-w-[32px];
+}
+.word-tool-button.active {
+  @apply bg-slate-400 text-white;
+}
+
+.ruler-horizontal {
+  height: 24px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+}
+.ruler-tick {
+  border-left: 1px solid #94a3b8;
+  height: 4px;
+}
+.ruler-tick-major {
+  height: 8px;
+  border-left-color: #475569;
+}
+.ruler-number {
+  font-size: 9px;
+  color: #64748b;
+  position: absolute;
+  bottom: 8px;
+  transform: translateX(-50%);
+}
+
+.page-shadow {
+  box-shadow: 0 0 15px rgba(0,0,0,0.1), 0 0 5px rgba(0,0,0,0.05);
+}
+
+/* IDE-like Assistant Styles */
+.ide-sidebar {
+  @apply flex flex-col bg-[#1e1e1e] text-[#cccccc] font-sans;
+}
+.ide-header {
+  @apply flex items-center justify-between px-3 py-2 bg-[#252526] border-b border-[#333333];
+}
+.ide-section-header {
+  @apply flex items-center gap-2 px-3 py-1 bg-[#2d2d2d] text-[10px] font-bold uppercase tracking-wider text-[#969696] cursor-pointer hover:bg-[#373737];
+}
+.ide-chat-bubble {
+  @apply rounded-md p-3 text-sm leading-relaxed mb-4;
+}
+.ide-chat-bubble-user {
+  @apply bg-[#0e639c] text-white self-end ml-8;
+}
+.ide-chat-bubble-ai {
+  @apply bg-[#2d2d2d] border border-[#454545] text-[#cccccc] mr-8;
+}
+.ide-input-container {
+  @apply p-3 bg-[#252526] border-t border-[#333333];
+}
+.ide-input {
+  @apply w-full bg-[#3c3c3c] border border-[#3c3c3c] rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-[#007acc];
+}
+.diff-added { @apply bg-emerald-950 text-emerald-200 px-1 rounded; }
+.diff-removed { @apply bg-rose-950 text-rose-200 px-1 rounded line-through; }

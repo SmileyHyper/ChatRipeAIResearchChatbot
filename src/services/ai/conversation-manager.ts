@@ -1,6 +1,15 @@
 import type { AIProviderId, ChatMessage, Conversation } from '../../types/ai';
 
 const ACTIVE_CONV_KEY = 'chatripe_active_conversation_id';
+const DEFAULT_OLLAMA_MODEL = 'llama3.2:3b';
+
+function normalizeStoredProvider(provider: string): AIProviderId {
+  return provider === 'claude' ? 'claude' : 'ollama';
+}
+
+function normalizeStoredModel(provider: string, model: string): string {
+  return provider === 'gemini' || model === 'qwen3-vl:8b' ? DEFAULT_OLLAMA_MODEL : model;
+}
 
 export class ConversationManager {
   private conversations: Map<string, Conversation> = new Map();
@@ -27,12 +36,18 @@ export class ConversationManager {
       const res = await fetch('/api/conversations', { headers: this.getHeaders() });
       if (res.ok) {
         const data = await res.json();
-        const list: Conversation[] = (data.conversations || []).map((c: any) => ({
-          ...c,
-          provider: c.ai_provider,
-          model: c.ai_model,
-          messages: [],
-        }));
+        const list: Conversation[] = (data.conversations || []).map((c: any) => {
+          const provider = normalizeStoredProvider(c.ai_provider);
+          const model = normalizeStoredModel(c.ai_provider, c.ai_model);
+          return {
+            ...c,
+            ai_provider: provider,
+            ai_model: model,
+            provider,
+            model,
+            messages: [],
+          };
+        });
 
         this.conversations.clear();
         for (const conv of list) {
@@ -64,16 +79,26 @@ export class ConversationManager {
       const res = await fetch(`/api/conversations/${id}`, { headers: this.getHeaders() });
       if (res.ok) {
         const data = await res.json();
+        const provider = normalizeStoredProvider(data.conversation.ai_provider);
+        const model = normalizeStoredModel(data.conversation.ai_provider, data.conversation.ai_model);
         const conv: Conversation = {
           ...data.conversation,
-          provider: data.conversation.ai_provider,
-          model: data.conversation.ai_model,
-          messages: (data.messages || []).map((m: any) => ({
-            ...m,
-            provider: m.ai_provider,
-            model: m.ai_model,
-            createdAt: m.created_at,
-          })),
+          ai_provider: provider,
+          ai_model: model,
+          provider,
+          model,
+          messages: (data.messages || []).map((m: any) => {
+            const messageProvider = normalizeStoredProvider(m.ai_provider || provider);
+            const messageModel = normalizeStoredModel(m.ai_provider, m.ai_model);
+            return {
+              ...m,
+              ai_provider: messageProvider,
+              ai_model: messageModel,
+              provider: messageProvider,
+              model: messageModel,
+              createdAt: m.created_at,
+            };
+          }),
         };
         this.conversations.set(id, conv);
         return conv;

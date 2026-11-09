@@ -49,7 +49,7 @@ export function ConversationHistoryView({
         <div>
           <h1 className="text-xl font-bold text-[#082b5c] font-['Montserrat']">Conversation History & Archive</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Search, rename, resume, or archive past scholarly research dialogues across Ollama, Gemini, and Claude.
+            Search, rename, resume, or archive past scholarly research dialogues across Ollama and Claude.
           </p>
         </div>
 
@@ -195,4 +195,3 @@ export function ConversationHistoryView({
     </div>
   );
 }
-

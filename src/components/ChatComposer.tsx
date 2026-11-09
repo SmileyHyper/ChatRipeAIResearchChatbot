@@ -13,6 +13,9 @@ interface ChatComposerProps {
   hasMessages: boolean;
   attachedDocument?: ResearchDocument | null;
   onRemoveAttachment?: () => void;
+  attachedImage?: { name: string; dataUrl: string } | null;
+  imageError?: string | null;
+  onImageSelect?: (file: File | null) => void;
 }
 
 export function ChatComposer({
@@ -27,8 +30,12 @@ export function ChatComposer({
   hasMessages,
   attachedDocument,
   onRemoveAttachment,
+  attachedImage,
+  imageError,
+  onImageSelect,
 }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -43,7 +50,7 @@ export function ChatComposer({
       onStop();
       return;
     }
-    if (!prompt.trim()) return;
+    if (!prompt.trim() && !attachedImage) return;
     onSend();
   };
 
@@ -94,6 +101,26 @@ export function ChatComposer({
           </div>
         )}
 
+        {attachedImage && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-[#082b5c]">
+            <img src={attachedImage.dataUrl} alt="Selected image preview" className="h-12 w-12 rounded object-cover" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-semibold">{attachedImage.name}</p>
+              <p className="text-[10px] text-slate-500">Analyzed locally with qwen3-vl:8b</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => onImageSelect?.(null)}
+              className="p-1 text-slate-400 hover:text-rose-600"
+              title="Remove image"
+              aria-label="Remove image"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {imageError && <p role="alert" className="mb-2 text-xs text-rose-600">{imageError}</p>}
+
         <textarea
           ref={textareaRef}
           id="prompt"
@@ -102,7 +129,7 @@ export function ChatComposer({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              if (!isStreaming && prompt.trim()) {
+              if (!isStreaming && (prompt.trim() || attachedImage)) {
                 onSend();
               }
             }
@@ -124,6 +151,31 @@ export function ChatComposer({
 
           {/* Action Buttons */}
           <div className="ml-auto flex items-center gap-2">
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              disabled={isStreaming}
+              onChange={(event) => {
+                onImageSelect?.(event.target.files?.[0] || null);
+                event.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => imageInputRef.current?.click()}
+              disabled={isStreaming}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Attach an image for Qwen3-VL analysis"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="m21 15-5-5L5 21" />
+              </svg>
+              Image
+            </button>
             {isStreaming ? (
               <button
                 type="button"
@@ -140,7 +192,7 @@ export function ChatComposer({
               <button
                 type="submit"
                 className="send cursor-pointer"
-                disabled={!prompt.trim()}
+                disabled={!prompt.trim() && !attachedImage}
                 aria-label="Send message"
                 title="Send message (Enter)"
               >

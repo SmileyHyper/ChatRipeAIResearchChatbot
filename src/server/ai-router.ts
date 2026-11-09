@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import Anthropic from '@anthropic-ai/sdk';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import dotenv from 'dotenv';
@@ -36,14 +35,13 @@ export interface ChatMessagePayload {
 
 export interface ChatRequestPayload {
   conversationId?: string;
-  provider: 'ollama' | 'gemini' | 'claude';
+  provider: 'ollama' | 'claude';
   model: string;
   messages: ChatMessagePayload[];
   systemPrompt?: string;
   documentIds?: string[];
   enableMemory?: boolean;
   settings?: {
-    geminiApiKey?: string;
     claudeApiKey?: string;
     ollamaBaseUrl?: string;
   };
@@ -58,13 +56,6 @@ export const DEFAULT_MODELS = {
     { id: 'mistral', name: 'Mistral 7B', description: 'General purpose versatile model', parameterSize: '7B', isLocal: true },
     { id: 'deepseek-r1', name: 'DeepSeek-R1', description: 'Advanced reasoning and problem-solving', parameterSize: '7B/8B', isLocal: true },
     { id: 'gemma3', name: 'Gemma 3', description: 'Google open weights model', parameterSize: '4B/12B', isLocal: true },
-  ],
-  gemini: [
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Google next-gen high speed multimodal model (Recommended)', parameterSize: 'Cloud', isLocal: false },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Advanced reasoning, deep research and complex analysis', parameterSize: 'Cloud', isLocal: false },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Ultra-fast low-latency cloud model', parameterSize: 'Cloud', isLocal: false },
-    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Efficient general research model', parameterSize: 'Cloud', isLocal: false },
-    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Large context window (1M+ tokens)', parameterSize: 'Cloud', isLocal: false },
   ],
   claude: [
     { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet', description: 'Hybrid reasoning and high performance (Anthropic)', parameterSize: 'Cloud', isLocal: false },
@@ -115,7 +106,7 @@ export function sendJson(res: ServerResponse, statusCode: number, data: any) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gemini-api-key, x-claude-api-key, x-ollama-url, x-user-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-claude-api-key, x-ollama-url, x-user-id');
   res.end(JSON.stringify(data));
 }
 
@@ -128,7 +119,7 @@ export function initSse(res: ServerResponse) {
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gemini-api-key, x-claude-api-key, x-ollama-url, x-user-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-claude-api-key, x-ollama-url, x-user-id');
   res.flushHeaders?.();
 }
 
@@ -507,6 +498,35 @@ export async function handleDocuments(req: IncomingMessage, res: ServerResponse,
     return sendJson(res, 201, { document: createdDoc });
   }
 
+  // Preview an uploaded PDF: /api/documents/:id/file
+  const matchFile = pathname.match(/^\/api\/documents\/([^/]+)\/file$/);
+  if (matchFile && method === 'GET') {
+    const doc = db
+      .prepare('SELECT file_path, file_format, title FROM research_documents WHERE id = ? AND user_id = ?')
+      .get(matchFile[1], userId) as { file_path?: string; file_format: string; title: string } | undefined;
+    if (!doc || doc.file_format.toLowerCase() !== 'pdf' || !doc.file_path) {
+      return sendJson(res, 404, { error: 'PDF document not found' });
+    }
+
+    const uploadsDir = path.resolve(UPLOADS_DIR);
+    const filePath = path.resolve(doc.file_path);
+    const relativePath = path.relative(uploadsDir, filePath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || !fs.existsSync(filePath)) {
+      return sendJson(res, 404, { error: 'PDF document not found' });
+    }
+
+    const buffer = fs.readFileSync(filePath);
+    const safeFileName = `${doc.title.replace(/[^a-zA-Z0-9._-]/g, '_') || 'document'}.pdf`;
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeFileName}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.end(buffer);
+    return;
+  }
+
   // Create document manually (e.g. from template or blank editor): /api/documents
   if (pathname === '/api/documents' && method === 'POST') {
     const body = await readJsonBody(req);
@@ -750,7 +770,6 @@ Return ONLY the rewritten text.`;
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
   ollama: 'llama3.2:3b',
-  gemini: 'gemini-2.5-flash',
   claude: 'claude-3-7-sonnet-latest',
 };
 
@@ -762,21 +781,6 @@ async function callWritingModel(opts: {
   settings?: any;
 }): Promise<string> {
   const { provider, model, system, messages, settings } = opts;
-
-  if (provider === 'gemini') {
-    const apiKey = settings?.geminiApiKey || process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('Gemini API key is missing. Configure in Settings.');
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model,
-      contents: messages.map((m) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      })),
-      config: { systemInstruction: system },
-    });
-    return response.text || '';
-  }
 
   if (provider === 'claude') {
     const apiKey = settings?.claudeApiKey || process.env.ANTHROPIC_API_KEY;
@@ -876,7 +880,6 @@ export async function handleWritingAssistant(req: IncomingMessage, res: ServerRe
 // ==========================================
 export async function handleHealthCheck(req: IncomingMessage, res: ServerResponse) {
   const customOllamaUrl = (req.headers['x-ollama-url'] as string) || DEFAULT_OLLAMA_URL;
-  const customGeminiKey = (req.headers['x-gemini-api-key'] as string) || process.env.GEMINI_API_KEY;
   const customClaudeKey = (req.headers['x-claude-api-key'] as string) || process.env.ANTHROPIC_API_KEY;
 
   const results: Record<string, any> = {
@@ -888,14 +891,6 @@ export async function handleHealthCheck(req: IncomingMessage, res: ServerRespons
       isConfigured: true,
       endpoint: customOllamaUrl,
       message: 'Checking...',
-    },
-    gemini: {
-      id: 'gemini',
-      name: 'Google Gemini',
-      type: 'cloud',
-      isConnected: false,
-      isConfigured: Boolean(customGeminiKey && customGeminiKey.trim().length > 5),
-      message: customGeminiKey ? 'API Key configured' : 'API Key missing',
     },
     claude: {
       id: 'claude',
@@ -928,11 +923,6 @@ export async function handleHealthCheck(req: IncomingMessage, res: ServerRespons
     results.ollama.message = 'Ollama server unavailable. Ensure Ollama is running (`ollama serve`).';
   }
 
-  if (results.gemini.isConfigured) {
-    results.gemini.isConnected = true;
-    results.gemini.message = 'Ready (API Key configured)';
-  }
-
   if (results.claude.isConfigured) {
     results.claude.isConnected = true;
     results.claude.message = 'Ready (API Key configured)';
@@ -943,13 +933,12 @@ export async function handleHealthCheck(req: IncomingMessage, res: ServerRespons
 
 export async function handleListModels(req: IncomingMessage, res: ServerResponse) {
   const customOllamaUrl = (req.headers['x-ollama-url'] as string) || DEFAULT_OLLAMA_URL;
-  const customGeminiKey = (req.headers['x-gemini-api-key'] as string) || process.env.GEMINI_API_KEY;
   const customClaudeKey = (req.headers['x-claude-api-key'] as string) || process.env.ANTHROPIC_API_KEY;
 
   const models: Array<{
     id: string;
     name: string;
-    provider: 'ollama' | 'gemini' | 'claude';
+    provider: 'ollama' | 'claude';
     description?: string;
     parameterSize?: string;
     isLocal: boolean;
@@ -989,13 +978,147 @@ export async function handleListModels(req: IncomingMessage, res: ServerResponse
     DEFAULT_MODELS.ollama.forEach((m) => models.push({ ...m, provider: 'ollama', isAvailable: false }));
   }
 
-  const isGeminiAvailable = Boolean(customGeminiKey && customGeminiKey.trim().length > 5);
-  DEFAULT_MODELS.gemini.forEach((m) => models.push({ ...m, provider: 'gemini', isAvailable: isGeminiAvailable }));
-
   const isClaudeAvailable = Boolean(customClaudeKey && customClaudeKey.trim().length > 5);
   DEFAULT_MODELS.claude.forEach((m) => models.push({ ...m, provider: 'claude', isAvailable: isClaudeAvailable }));
 
   sendJson(res, 200, { models });
+}
+
+const QWEN_VISION_MODEL = 'qwen3-vl:8b';
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const IMAGE_ANALYSIS_TIMEOUT_MS = 10 * 60 * 1000;
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function getOllamaVisionError(status: number, errorText: string): string {
+  const normalizedError = errorText.toLowerCase();
+  if (
+    normalizedError.includes('out-of-memory')
+    || normalizedError.includes('failed to allocate')
+    || normalizedError.includes('not enough memory')
+    || normalizedError.includes('memory allocation')
+  ) {
+    return `Ollama ran out of system memory while loading ${QWEN_VISION_MODEL}. ChatRipe now limits vision context to 2K, but the 8B model still needs several GB of free RAM. Close memory-heavy apps and retry; if it still fails, use a smaller vision model or a machine with more available RAM.`;
+  }
+  if (normalizedError.includes('failed to load clip model') || normalizedError.includes('llama-server process no longer running')) {
+    return `Ollama could not load Qwen3-VL's CLIP vision encoder. The local model files may be damaged or incompatible with this Ollama version. Update and restart Ollama, then run 'ollama rm ${QWEN_VISION_MODEL}' followed by 'ollama pull ${QWEN_VISION_MODEL}' to download a fresh copy.`;
+  }
+  if (status === 404 || normalizedError.includes('not found')) {
+    return `Model '${QWEN_VISION_MODEL}' was not found in Ollama. Run 'ollama pull ${QWEN_VISION_MODEL}' to download it.`;
+  }
+  return `Ollama image analysis failed (${status}): ${errorText}`;
+}
+
+export async function handleImageAnalysis(req: IncomingMessage, res: ServerResponse) {
+  let body: {
+    conversationId?: string;
+    imageBase64?: string;
+    mimeType?: string;
+    prompt?: string;
+  };
+
+  try {
+    body = await readJsonBody(req, 15 * 1024 * 1024);
+  } catch (err: any) {
+    return sendJson(res, 400, { error: err.message || 'Invalid request body' });
+  }
+
+  const prompt = body.prompt?.trim();
+  if (!body.conversationId) return sendJson(res, 400, { error: 'Missing required field: conversationId' });
+  if (!prompt) return sendJson(res, 400, { error: 'Enter a prompt to analyze the image.' });
+  if (prompt.length > 10000) return sendJson(res, 400, { error: 'Prompt must be 10,000 characters or fewer.' });
+  if (!body.mimeType || !SUPPORTED_IMAGE_TYPES.has(body.mimeType)) {
+    return sendJson(res, 400, { error: 'Use a JPEG, PNG, or WebP image.' });
+  }
+  if (!body.imageBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.imageBase64)) {
+    return sendJson(res, 400, { error: 'A valid base64-encoded image is required.' });
+  }
+
+  const image = Buffer.from(body.imageBase64, 'base64');
+  if (image.length === 0 || image.length > MAX_IMAGE_BYTES) {
+    return sendJson(res, 400, { error: 'Image must be 10 MB or smaller.' });
+  }
+
+  const userId = getAuthenticatedUserId(req);
+  const conversation = db.prepare('SELECT id, title FROM conversations WHERE id = ? AND user_id = ?')
+    .get(body.conversationId, userId) as { id: string; title: string } | undefined;
+  if (!conversation) return sendJson(res, 404, { error: 'Conversation not found.' });
+
+  const ollamaUrl = (req.headers['x-ollama-url'] as string) || process.env.OLLAMA_BASE_URL || DEFAULT_OLLAMA_URL;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), IMAGE_ANALYSIS_TIMEOUT_MS);
+  let clientDisconnected = false;
+  const abortOnDisconnect = () => {
+    if (!res.writableEnded) {
+      clientDisconnected = true;
+      controller.abort();
+    }
+  };
+  res.on('close', abortOnDisconnect);
+
+  let response: Response;
+  try {
+    response = await fetch(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: QWEN_VISION_MODEL,
+        stream: false,
+        options: { num_ctx: 2048 },
+        messages: [{ role: 'user', content: prompt, images: [body.imageBase64] }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (clientDisconnected || res.destroyed) return;
+    if (err.name === 'AbortError') {
+      return sendJson(res, 504, { error: `Qwen3-VL image analysis timed out after ${IMAGE_ANALYSIS_TIMEOUT_MS / 60000} minutes. The first run may take longer while Ollama loads the model; try again or check Ollama's model/server logs.` });
+    }
+    return sendJson(res, 502, {
+      error: `Cannot connect to Ollama at ${ollamaUrl}. Ensure Ollama is running and 'qwen3-vl:8b' is installed.`,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+    res.off('close', abortOnDisconnect);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    return sendJson(res, 502, { error: getOllamaVisionError(response.status, errorText) });
+  }
+
+  let data: { message?: { content?: string } };
+  try {
+    data = await response.json() as { message?: { content?: string } };
+  } catch {
+    return sendJson(res, 502, { error: 'Ollama returned an invalid image analysis response.' });
+  }
+  const content = data.message?.content?.trim();
+  if (!content) return sendJson(res, 502, { error: 'Qwen3-VL returned an empty image analysis.' });
+
+  const now = Date.now();
+  const displayPrompt = `${prompt}\n\n[Image attached]`;
+  const insertMessage = db.prepare(`
+    INSERT INTO messages (id, conversation_id, role, content, ai_provider, ai_model, created_at)
+    VALUES (?, ?, ?, ?, 'ollama', ?, ?)
+  `);
+  db.exec('BEGIN');
+  try {
+    if (conversation.title === 'New conversation' || conversation.title.length === 0) {
+      const title = prompt.replace(/\s+/g, ' ').slice(0, 36) || 'Image analysis';
+      db.prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?')
+        .run(title, now, conversation.id);
+    } else {
+      db.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(now, conversation.id);
+    }
+    insertMessage.run(`msg_${now}_user`, conversation.id, 'user', displayPrompt, QWEN_VISION_MODEL, now);
+    insertMessage.run(`msg_${now}_assistant`, conversation.id, 'assistant', content, QWEN_VISION_MODEL, now + 1);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return sendJson(res, 200, { content, model: QWEN_VISION_MODEL });
 }
 
 // ==========================================
@@ -1015,6 +1138,9 @@ export async function handleChatStream(req: IncomingMessage, res: ServerResponse
 
   if (!provider) return sendJson(res, 400, { error: 'Missing required field: provider' });
   if (!model) return sendJson(res, 400, { error: 'Missing required field: model' });
+  if (provider === 'ollama' && model === QWEN_VISION_MODEL) {
+    return sendJson(res, 400, { error: `Use the Image button to analyze images with ${QWEN_VISION_MODEL}. This vision model is not available for regular text chat.` });
+  }
   if (!Array.isArray(messages) || messages.length === 0) {
     return sendJson(res, 400, { error: 'Messages array cannot be empty' });
   }
@@ -1122,10 +1248,6 @@ export async function handleChatStream(req: IncomingMessage, res: ServerResponse
 
     if (provider === 'ollama') {
       await streamOllamaChat(streamPayload, res, () => isAborted, (chunk) => {
-        fullGeneratedText += chunk;
-      });
-    } else if (provider === 'gemini') {
-      await streamGeminiChat(streamPayload, res, () => isAborted, (chunk) => {
         fullGeneratedText += chunk;
       });
     } else if (provider === 'claude') {
@@ -1252,60 +1374,6 @@ async function streamOllamaChat(
     }
   }
 
-}
-
-/**
- * Stream Google Gemini Cloud AI
- */
-async function streamGeminiChat(
-  payload: ChatRequestPayload,
-  res: ServerResponse,
-  checkAborted: () => boolean,
-  onChunk: (c: string) => void
-) {
-  const apiKey = payload.settings?.geminiApiKey || process.env.GEMINI_API_KEY;
-
-  if (!apiKey || !apiKey.trim()) {
-    throw new Error('Google Gemini API key is missing. Set GEMINI_API_KEY in your .env file or enter your API key in Settings.');
-  }
-
-  const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
-
-  const contents = payload.messages
-    .filter((m) => m.content && m.content.trim())
-    .map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
-
-  try {
-    const responseStream = await ai.models.generateContentStream({
-      model: payload.model,
-      contents,
-      config: {
-        systemInstruction: payload.systemPrompt,
-      },
-    });
-
-    for await (const chunk of responseStream) {
-      if (checkAborted()) break;
-      const text = chunk.text;
-      if (text) {
-        onChunk(text);
-        writeSse(res, { type: 'chunk', delta: text, model: payload.model });
-      }
-    }
-
-  } catch (err: any) {
-    const msg = err.message || String(err);
-    if (msg.includes('API_KEY_INVALID') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('invalid api key')) {
-      throw new Error('Invalid Gemini API Key. Please verify your API key in Settings or .env.');
-    }
-    if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) {
-      throw new Error('Gemini API quota exceeded or rate limit reached. Please wait a moment.');
-    }
-    throw new Error(`Google Gemini Error: ${msg}`);
-  }
 }
 
 /**

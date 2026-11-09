@@ -6,6 +6,7 @@ import {
   handleDocuments,
   handleFolders,
   handleHealthCheck,
+  handleImageAnalysis,
   handleListModels,
   handleMemoriesAndContexts,
   handleWritingAssistant,
@@ -25,7 +26,7 @@ export function aiApiPlugin(): Plugin {
           res.statusCode = 204;
           res.setHeader('Access-Control-Allow-Origin', '*');
           res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-gemini-api-key, x-claude-api-key, x-ollama-url, x-user-id');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-claude-api-key, x-ollama-url, x-user-id');
           res.end();
           return;
         }
@@ -61,6 +62,10 @@ export function aiApiPlugin(): Plugin {
 
           if (url === '/api/ai/models' && method === 'GET') {
             return await handleListModels(req, res);
+          }
+
+          if (url === '/api/ai/analyze-image' && method === 'POST') {
+            return await handleImageAnalysis(req, res);
           }
 
           if (url === '/api/ai/chat' && method === 'POST') {

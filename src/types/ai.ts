@@ -1,4 +1,4 @@
-export type AIProviderId = 'ollama' | 'gemini' | 'claude';
+export type AIProviderId = 'ollama' | 'claude';
 
 export interface User {
   id: string;
@@ -129,7 +129,6 @@ export interface DocumentVersion {
 }
 
 export interface UserProviderSettings {
-  geminiApiKey?: string;
   claudeApiKey?: string;
   ollamaBaseUrl?: string;
   enableMemory?: boolean;

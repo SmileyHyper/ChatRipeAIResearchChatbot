@@ -36,7 +36,6 @@ export class ResponseHandler {
       };
 
       if (request.settings?.ollamaBaseUrl) headers['x-ollama-url'] = request.settings.ollamaBaseUrl;
-      if (request.settings?.geminiApiKey) headers['x-gemini-api-key'] = request.settings.geminiApiKey;
       if (request.settings?.claudeApiKey) headers['x-claude-api-key'] = request.settings.claudeApiKey;
 
       const response = await fetch('/api/ai/chat', {
@@ -126,20 +125,14 @@ export class ResponseHandler {
     const message = err.message || String(err);
 
     if (provider === 'ollama') {
+      if (message.toLowerCase().includes('failed to load clip model') || message.toLowerCase().includes('llama-server process no longer running')) {
+        return "Ollama couldn't load Qwen3-VL's CLIP vision encoder. Update and restart Ollama, then run `ollama rm qwen3-vl:8b` and `ollama pull qwen3-vl:8b` to download a fresh model.";
+      }
       if (message.includes('Failed to fetch') || message.includes('unavailable') || message.includes('ECONNREFUSED')) {
         return 'Ollama server is unavailable. Please ensure Ollama is installed and running (`ollama serve`) at http://localhost:11434.';
       }
       if (message.includes('not found')) {
         return `${message}. Run 'ollama pull <model-name>' in your terminal to install it.`;
-      }
-    }
-
-    if (provider === 'gemini') {
-      if (message.includes('API key is missing') || message.includes('API_KEY_INVALID') || message.includes('Invalid Gemini API Key')) {
-        return 'Gemini API key is missing or invalid. Please open Settings (gear icon) to configure your Google Gemini API key, or add GEMINI_API_KEY in .env.';
-      }
-      if (message.includes('quota') || message.includes('RESOURCE_EXHAUSTED') || message.includes('429')) {
-        return 'Google Gemini API quota exceeded or rate limit reached. Please wait a moment.';
       }
     }
 

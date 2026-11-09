@@ -10,9 +10,17 @@ import { ResearchLibrary } from './components/ResearchLibrary';
 import { ResearchEditor } from './components/ResearchEditor';
 import { ConversationHistoryView } from './components/ConversationHistoryView';
 
+interface AttachedImage {
+  name: string;
+  mimeType: string;
+  base64: string;
+  dataUrl: string;
+}
+
 export default function App() {
   const [activeNav, setActiveNav] = useState('Chat');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // AI & Conversations State
@@ -22,7 +30,6 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [providers, setProviders] = useState<Record<AIProviderId, ProviderStatus>>({
     ollama: { id: 'ollama', name: 'Ollama', type: 'local', isConnected: false, isConfigured: true },
-    gemini: { id: 'gemini', name: 'Google Gemini', type: 'cloud', isConnected: false, isConfigured: false },
     claude: { id: 'claude', name: 'Claude (Anthropic)', type: 'cloud', isConnected: false, isConfigured: false },
   });
   const [models, setModels] = useState<AIModel[]>([]);
@@ -31,6 +38,8 @@ export default function App() {
   // Research Materials & Editor States
   const [editorDocument, setEditorDocument] = useState<ResearchDocument | null>(null);
   const [attachedDocument, setAttachedDocument] = useState<ResearchDocument | null>(null);
+  const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -94,6 +103,8 @@ export default function App() {
     setConversations(all);
     setActiveConv({ ...newConv });
     setPrompt('');
+    setAttachedImage(null);
+    setImageError(null);
   };
 
   // Delete Conversation
@@ -120,6 +131,8 @@ export default function App() {
     await aiService.conversationManager.clearCurrentMessages();
     const active = aiService.conversationManager.getActiveConversation();
     setActiveConv({ ...active });
+    setAttachedImage(null);
+    setImageError(null);
   };
 
   // Switch Provider & Model
@@ -133,8 +146,35 @@ export default function App() {
 
   // Send Prompt Message
   const handleSendMessage = async (textToSend?: string) => {
-    const messageText = textToSend || prompt;
-    if (!messageText.trim() || isStreaming) return;
+    const messageText = textToSend === undefined ? prompt : textToSend;
+    if ((!messageText.trim() && !attachedImage) || isStreaming) return;
+
+    if (attachedImage) {
+      const imagePrompt = messageText.trim() || 'Describe this image.';
+      setPrompt('');
+      setIsStreaming(true);
+
+      try {
+        const analysis = aiService.analyzeImage(attachedImage.base64, attachedImage.mimeType, imagePrompt);
+        const active = aiService.conversationManager.getActiveConversation();
+        setActiveConv({ ...active });
+        setConversations(aiService.conversationManager.getAllConversations());
+        await analysis;
+        setAttachedImage(null);
+        setImageError(null);
+      } catch (error) {
+        setPrompt(messageText);
+        setImageError(error instanceof Error ? error.message : 'Image analysis failed.');
+      } finally {
+        setIsStreaming(false);
+        const active = aiService.conversationManager.getActiveConversation();
+        setActiveConv({ ...active });
+        setConversations(aiService.conversationManager.getAllConversations());
+      }
+      return;
+    }
+
+    if (!messageText.trim()) return;
 
     setPrompt('');
     setIsStreaming(true);
@@ -172,6 +212,44 @@ export default function App() {
       setIsStreaming(false);
       const active = aiService.conversationManager.getActiveConversation();
       setActiveConv({ ...active });
+    }
+  };
+
+  const handleImageSelect = async (file: File | null) => {
+    setImageError(null);
+    if (!file) {
+      setAttachedImage(null);
+      return;
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setAttachedImage(null);
+      setImageError('Choose a JPEG, PNG, or WebP image.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setAttachedImage(null);
+      setImageError('Image must be 10 MB or smaller.');
+      return;
+    }
+
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Could not read the selected image.'));
+        reader.onerror = () => reject(new Error('Could not read the selected image.'));
+        reader.readAsDataURL(file);
+      });
+      const separatorIndex = dataUrl.indexOf(',');
+      if (separatorIndex < 0) throw new Error('Could not encode the selected image.');
+      setAttachedImage({
+        name: file.name,
+        mimeType: file.type,
+        base64: dataUrl.slice(separatorIndex + 1),
+        dataUrl,
+      });
+    } catch (error) {
+      setAttachedImage(null);
+      setImageError(error instanceof Error ? error.message : 'Could not read the selected image.');
     }
   };
 
@@ -249,7 +327,7 @@ export default function App() {
   const messages = activeConv?.messages || [];
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" style={{ '--sidebar-width': sidebarCollapsed ? '72px' : '264px' } as React.CSSProperties}>
       {/* Mobile Toggle Button */}
       <button
         className="mobile-menu"
@@ -275,6 +353,8 @@ export default function App() {
         onCloseMenu={() => setMenuOpen(false)}
         activeNav={activeNav}
         onSelectNav={setActiveNav}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
       {/* Main Content Area */}
@@ -361,7 +441,7 @@ export default function App() {
                         message={msg}
                         isStreaming={isStreaming && isLastAssistant}
                         isLastAssistantMessage={isLastAssistant}
-                        onRegenerate={handleRegenerate}
+                        onRegenerate={msg.model === 'qwen3-vl:8b' ? undefined : handleRegenerate}
                         onOpenSettings={() => setSettingsOpen(true)}
                       />
                     );
@@ -383,6 +463,9 @@ export default function App() {
                 hasMessages={messages.length > 0}
                 attachedDocument={attachedDocument}
                 onRemoveAttachment={() => setAttachedDocument(null)}
+                attachedImage={attachedImage}
+                imageError={imageError}
+                onImageSelect={handleImageSelect}
               />
             </div>
           )}
@@ -425,7 +508,7 @@ export default function App() {
             />
           )}
 
-          
+         
           {/* Footer */}
           <footer>
             <span>

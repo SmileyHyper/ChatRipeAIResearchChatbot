@@ -1,14 +1,14 @@
 # ChatRipe – Multi-Model AI Research Chatbot
 
-**ChatRipe** is a scholarly research AI chatbot built for Southern Leyte State University (SLSU) researchers, scholars, and innovators. It features a **Multi-Model AI System** that allows seamless switching between **local on-device models via Ollama**, **cloud-based models via Google Gemini**, and **Anthropic Claude** through a single unified interface.
+**ChatRipe** is a scholarly research AI chatbot built for Southern Leyte State University (SLSU) researchers, scholars, and innovators. It supports local text models through Ollama, local image analysis with Qwen3-VL, and optional Anthropic Claude.
 
 ---
 
 ## 🌟 Key Features
 
 - **Multi-Model AI Selector**:
-  - **Ollama (Local)**: Run private, offline open-weights models (`llama3.2:3b`, `qwen2.5`, `mistral`, `deepseek-r1`, `gemma3`) directly on your machine.
-  - **Google Gemini (Cloud)**: Connect to Google's state-of-the-art models (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) using the official `@google/genai` SDK.
+  - **Ollama (Local)**: Run private, offline open-weights text models (`llama3.2:3b`, `qwen2.5`, `mistral`, `deepseek-r1`, `gemma3`) directly on your machine.
+  - **Qwen3-VL (Local Vision)**: Attach JPEG, PNG, or WebP images for local analysis with `qwen3-vl:8b`.
   - **Anthropic Claude (Cloud, Optional)**: Connect to Claude (`claude-3-7-sonnet-latest`, `claude-3-5-sonnet-latest`, `claude-3-5-haiku-latest`).
 - **Dynamic Model Discovery**: Automatically inspects the local Ollama server and lists all currently installed models.
 - **Real-Time Streaming**: Live streaming token-by-token generation with typing cursor and smooth rendering.
@@ -24,8 +24,8 @@
   - Copy entire response.
   - Clear conversation.
 - **Enterprise Security & Key Management**:
-  - Secure backend proxy/middleware prevents API keys from being leaked to client-side bundles.
-  - Configure keys via server `.env` or in-app secure Settings modal.
+  - Cloud API keys are handled by the backend and are never included in client-side bundles.
+  - Configure the optional Claude key via server `.env` or in-app Settings.
   - Never hardcodes credentials or exposes private tokens.
 
 ---
@@ -39,8 +39,9 @@ AI SERVICE
 │
 ├── Provider Manager
 │   ├── Ollama Provider (Local HTTP API)
-│   ├── Gemini Provider (Official @google/genai SDK)
 │   └── Claude Provider (@anthropic-ai/sdk)
+├── Vision Analysis
+│   └── Qwen3-VL (Ollama /api/chat)
 │
 ├── Model Manager
 │   ├── Dynamic Model Discovery (/api/ai/models)
@@ -89,14 +90,10 @@ cp .env.example .env
 Edit `.env` with your preferred settings:
 
 ```env
-# 1. Google Gemini API Key (Cloud)
-# Get your free API key at: https://aistudio.google.com/
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# 2. Ollama Local Endpoint (Default: http://localhost:11434)
+# 1. Ollama Local Endpoint (Default: http://localhost:11434)
 OLLAMA_BASE_URL=http://localhost:11434
 
-# 3. Anthropic Claude API Key (Optional)
+# 2. Anthropic Claude API Key (Optional)
 # Get your API key at: https://console.anthropic.com/
 ANTHROPIC_API_KEY=your_claude_api_key_here
 
@@ -104,7 +101,7 @@ ANTHROPIC_API_KEY=your_claude_api_key_here
 PORT=8443
 ```
 
-> **Note:** API keys can also be configured interactively via the in-app **Settings & Keys** modal without restarting the server.
+> **Note:** The Claude API key can also be configured interactively via **Settings** without restarting the server.
 
 ### 4. Running the Development Server
 
@@ -136,6 +133,9 @@ To run models locally without any cloud API fees or external network dependency:
    # Recommended compact model (3.2B parameters, ~2.0 GB):
    ollama pull llama3.2:3b
 
+   # Local image analysis:
+   ollama pull qwen3-vl:8b
+
    # Other high-quality models:
    ollama pull qwen2.5
    ollama pull mistral
@@ -148,24 +148,16 @@ To run models locally without any cloud API fees or external network dependency:
 
 ---
 
-## ♊ Google Gemini Setup
+## 🖼️ Local Image Analysis
 
-To use Google's cloud models:
+ChatRipe uses Qwen3-VL through your local Ollama server to analyze image attachments. Existing Ollama text chat continues using the selected text model.
 
-1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
-2. Set the key in `.env`:
-   ```env
-   GEMINI_API_KEY=AIzaSy...
+1. Install the vision model:
+   ```bash
+   ollama pull qwen3-vl:8b
    ```
-   *Or* open the **Settings** modal (gear icon) in the ChatRipe web UI and paste your key.
-3. Switch the AI Model Selector to **Gemini** and select your model (e.g., `gemini-2.5-flash` or `gemini-2.5-pro`).
-
-Supported Gemini models:
-- `gemini-2.5-flash` (Recommended next-generation fast model)
-- `gemini-2.5-pro` (Advanced reasoning & deep research)
-- `gemini-2.0-flash` (Ultra-low latency)
-- `gemini-1.5-flash` (Efficient general research)
-- `gemini-1.5-pro` (Long-context analysis)
+2. In ChatRipe, choose **Image** in the chat composer, select a JPEG, PNG, or WebP image up to 10 MB, and enter a question or leave the prompt blank for a general description.
+3. Submit the prompt. The image is sent to the configured Ollama endpoint and analyzed with `qwen3-vl:8b`. The uploaded image itself is not stored; the prompt and text response are saved in conversation history.
 
 ---
 
@@ -177,13 +169,13 @@ A comprehensive automated test suite is provided to verify connectivity, model d
 npm run test:ai
 ```
 
-The test runner will automatically test:
+The test runner checks:
 - Health check endpoints (`/api/ai/health`)
 - Dynamic Ollama model discovery (`/api/ai/models`)
 - Real-time streaming generation
-- Input validation (empty messages rejected with 400)
-- Graceful handling of missing or invalid API keys
-- Helpful notifications when a model is not yet installed
+- Input validation for text and image analysis
+- Removal of the Gemini provider and model list
+- Helpful notifications when an Ollama model is not installed
 
 ---
 
@@ -208,15 +200,13 @@ The server will serve both the compiled frontend assets from `dist/` and the `/a
 | Issue | Cause | Solution |
 | :--- | :--- | :--- |
 | **"Ollama server is unavailable"** | Ollama is not running or not listening on port 11434 | Run `ollama serve` in a terminal or launch the Ollama desktop app. |
-| **"Model not found in Ollama"** | The requested model is not downloaded locally | Run `ollama pull <model-name>` (e.g. `ollama pull llama3.2:3b`). |
-| **"Gemini API key is missing"** | No API key provided in `.env` or Settings | Add `GEMINI_API_KEY` to `.env` or paste it in the in-app Settings modal. |
-| **"Invalid Gemini API Key"** | The provided key has expired or is invalid | Generate a new key at [Google AI Studio](https://aistudio.google.com/). |
-| **"Resource exhausted / 429"** | Rate limit or quota reached on free cloud tier | Wait a few seconds, switch to another model, or switch to local Ollama. |
+| **"Model not found in Ollama"** | The requested text or vision model is not downloaded locally | Run `ollama pull <model-name>` (for image analysis, use `ollama pull qwen3-vl:8b`). |
+| **Image analysis is unavailable** | Ollama is stopped or `qwen3-vl:8b` is not installed | Start Ollama and run `ollama pull qwen3-vl:8b`. |
+| **Claude API authentication failed** | The configured Anthropic API key is invalid | Update the Claude key in `.env` or in-app Settings. |
 
 ---
 
 ## 📜 License & Acknowledgments
 
 Developed for **Southern Leyte State University (SLSU)** research community.
-Built with React 19, Tailwind CSS v4, Vite, Google GenAI SDK, and Ollama.
-
+Built with React 19, Tailwind CSS v4, Vite, Ollama, and the Anthropic SDK.
